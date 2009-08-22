@@ -1,0 +1,20 @@
+HOW TO WRAP HTTP::Server::Simple
+
+* HTTP::Server::Simple has no constructor arguments other than port. Everything is in the class. So there's not much reason to pass in an object, as opposed to a class name.
+* Take server_class and net_server_params
+* For port, pid_file, and error_log/log_file: use what is passed in or is provided in net_server_params
+* Call server_class->new using our port()
+  * Pass net_server_params along with port, pid_file, and error_log to run()
+
+HOW TO WRAP Net::Server
+
+  * Take net_server_class and net_server_params
+  * For port, pid_file, and error_log/log_file: use what is passed in or is provided in net_server_params
+  * Pass net_server_params along with port and pid_file to run()
+
+* HTTP::Server::Simple has a net_server method that can be overriden in the subclass. It must point to a Net::Server subclass. However, we can do like HTTP::Engine::Interface::ServerSimple and create an anonymous
+* Can pass Net::Server arguments to HTTP::Server::Simple::run().
+
+* Net::Server does not have obvious accessors for its properties (port, etc.) - you have to use get_property.
+* For our purposes, Net::Server gets its arguments either from the prebuilt object, or when passed to the run method.
+* So...the simplest case is for us to accept net_server (a class) and net_server_configure. Take a look at how HTTP::Engine::Interface::ServerSimple does it - it creates an anonymous subclass of HTTP::Server::Simple which overrides net_server.

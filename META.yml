@@ -1,0 +1,45 @@
+---
+abstract: 'Flexible apachectl style control for servers'
+author:
+  - 'Jonathan Swartz <swartz@pobox.com>'
+build_requires:
+  Capture::Tiny: 0
+  ExtUtils::MakeMaker: 6.42
+  File::Path: 0
+  Getopt::Long: 0
+  Guard: 0.5
+  HTTP::Server::Simple: 0.28
+  Net::Server: 0
+  POSIX: 0
+  Test::Class: 0
+  Test::Log::Dispatch: 0
+  Test::Most: 0
+configure_requires:
+  ExtUtils::MakeMaker: 6.42
+distribution_type: module
+generated_by: 'Module::Install version 0.91'
+license: perl
+meta-spec:
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
+name: Server-Control
+no_index:
+  directory:
+    - inc
+    - t
+requires:
+  File::Slurp: 9999.13
+  File::Spec::Functions: 0
+  File::Temp: 0
+  File::Which: 0
+  IO::Socket: 0
+  IPC::System::Simple: 1.18
+  List::MoreUtils: 0.13
+  Log::Any::Adapter::Dispatch: 0.03
+  Moose: 0.66
+  Proc::ProcessTable: 0.42
+  Time::HiRes: 0
+  perl: 5.6.0
+resources:
+  license: http://dev.perl.org/licenses/
+version: 0.01

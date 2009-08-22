@@ -1,0 +1,202 @@
+NAME
+    Server::Control -- Flexible apachectl style control for servers
+
+SYNOPSIS
+        use Server::Control::Apache;
+
+        my $apache = Server::Control::Apache->new(
+            root_dir     => '/my/apache/dir',
+            port         => 80
+        );
+        if ( !$apache->is_running() ) {
+            $apache->start();
+        }
+
+DESCRIPTION
+    `Server::Control' allows you to control servers in the spirit of
+    apachectl, where a server is any background process which listens to a
+    port and has a pid file.
+
+FEATURES
+    *   Checks server status in multiple ways (looking for an active
+        process, contacting the server's port)
+
+    *   Tails the error log when server fails to start
+
+    *   Detects and handles corrupt or out-of-date pid files
+
+    *   Uses sudo by default when using restricted (< 1024) port
+
+AVAILABLE SUBCLASSES
+    `Server::Control' is designed to be subclassed for different types of
+    servers. The following subclasses are currently available as part of
+    this distribution:
+
+    *   Server::Control::Apache - Apache httpd
+
+    *   Server::Control::Apache - HTTP::Server::Simple server
+
+    *   Server::Control::Apache - Net::Server server
+
+    These will probably be moved into their own distributions once the
+    implementation stabilizes.
+
+CONSTRUCTOR
+    You can pass the following common options to the constructor:
+
+    bind_addr
+        At least one address that the server binds to, so that
+        `Server::Control' can check it on start/stop. Defaults to
+        `localhost'. See also port.
+
+    description
+        Description of the server to be used in output and logs. A generic
+        default will be chosen if none is provided.
+
+    error_log
+        Location of error log. Defaults to *log_dir*/error_log if *log_dir*
+        is defined, otherwise undef. When a server fails to start,
+        Server::Control attempts to show recent messages in the error log.
+
+    log_dir
+        Location of logs. Defaults to *root_dir*/logs if *root_dir* is
+        defined, otherwise undef.
+
+    pid_file
+        Path to pid file.
+
+    port
+        At least one port that server will listen to, so that
+        `Server::Control' can check it on start/stop. Required. See also
+        bind_addr.
+
+    root_dir
+        Root directory of server, for conf files, log files, etc. This will
+        affect defaults of other options like *log_dir*.
+
+    use_sudo
+        Whether to use 'sudo' when attempting to start and stop server.
+        Defaults to true if *port* < 1024, false otherwise.
+
+    wait_for_start_secs
+        Number of seconds to wait for server start before reporting error.
+        Defaults to 10.
+
+    wait_for_stop_secs
+        Number of seconds to wait for server stop before reporting error.
+        Defaults to 10.
+
+METHODS
+  Action methods
+
+    start
+        Start the server. Calls do_start internally.
+
+    stop
+        Stop the server. Calls do_stop internally.
+
+    restart
+        Restart the server (by stopping it, then starting it).
+
+    ping
+        Log the server's status.
+
+    handle_cmdline ($cmd, $verbose)
+        Helper method to process a command-line command for a script like
+        apachectl. If *$cmd* is one of start, stop, restart, or ping, it
+        will be called on the object; otherwise, an appropriate usage error
+        will be thrown. This method will also cause messages to be logged to
+        STDOUT, as is expected for a command-line script. *$verbose* is a
+        boolean indicating whether the log level will be set to 'debug' or
+        'info'.
+
+  Status methods
+
+    is_running
+        If the server appears running (the pid file exists and contains a
+        valid process), returns a Proc::ProcessTable::Process object
+        representing the process. Otherwise returns undef.
+
+    is_listening
+        Returns a boolean indicating whether the server is listening to the
+        address and port specified in *bind_addr* and *port*. This is
+        checked to determine whether a server start or stop has been
+        successful.
+
+    status
+        Returns status of server as an integer. Use the following constants
+        to interpret status:
+
+        *   `Server::Control::RUNNING' - Pid file exists and contains a
+            valid process
+
+        *   `Server::Control::LISTENING' - Something is listening to the
+            specified bind address and port
+
+        *   `Server::Control::ACTIVE' - Equal to RUNNING & LISTENING
+
+        *   `Server::Control::INACTIVE' - Equal to 0 (neither RUNNING nor
+            LISTENING)
+
+    status_as_string
+        Returns status as a human-readable string, e.g. "server 'foo' is not
+        running"
+
+LOGGING
+    `Server::Control' uses Log::Any for logging, so you have control over
+    where logs will be sent, if anywhere. The exception is handle_cmdline,
+    which will tell `Log::Any' to send logs to STDOUT.
+
+IMPLEMENTING SUBCLASSES
+    `Server::Control' uses Moose, so ideally subclasses will as well. See
+    Server::Control::Apache for an example.
+
+  Subclass methods
+
+    do_start
+        This actually starts the server - it is called by start and must be
+        defined by the subclass. Any parameters to start are passed here. If
+        your server is started via the command-line, you may want to use
+        run_command.
+
+    do_stop ($proc)
+        This actually stops the server - it is called by stop and may be
+        defined by the subclass. By default, it will send a SIGTERM to the
+        process. *$proc* is a Proc::ProcessTable::Process object
+        representing the current process, as returned by is_running.
+
+    run_command ($cmd)
+        Runs the specified *$cmd* on the command line. Adds sudo if
+        necessary (see use_sudo), logs the command, and throws runtime
+        errors appropriately.
+
+RELATED MODULES
+    *   App::Control - Same basic idea for any application with a pid file.
+        No features specific to a server listening on a port, and not easily
+        subclassable, as all commands are handled in a single case
+        statement.
+
+    *   MooseX::Control - A Moose role for controlling applications with a
+        pid file. Nice extendability. No features specific to a server
+        listening on a port, and assumes server starts via a command-line
+        (unlike pure-Perl servers, say). May end up using this role.
+
+    *   Nginx::Control, Sphinx::Control, Lighttpd::Control - Modules which
+        use MooseX::Control
+
+TO DO
+    *   When a port is being listened to unexpectedly, attempt to report
+        which process is listening (via lsof, fuser, etc.)
+
+    *   Possibly add pre- and post- start and stop augment hooks like
+        MooseX::Control
+
+AUTHOR
+    Jonathan Swartz
+
+COPYRIGHT & LICENSE
+    Copyright (C) 2007 Jonathan Swartz, all rights reserved.
+
+    This program is free software; you can redistribute it and/or modify it
+    under the same terms as Perl itself.
+
