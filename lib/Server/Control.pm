@@ -11,14 +11,17 @@ use Time::HiRes qw(usleep);
 use strict;
 use warnings;
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
-has 'bind_addr'           => ( is => 'ro', default    => 'localhost' );
+# Note: In some cases we use lazy_build rather than specifying required or a
+# default, to make life easier for subclasses.
+#
+has 'bind_addr'           => ( is => 'ro', lazy_build => 1 );
 has 'description'         => ( is => 'ro', lazy_build => 1 );
 has 'error_log'           => ( is => 'ro', lazy_build => 1 );
 has 'log_dir'             => ( is => 'ro', lazy_build => 1 );
 has 'pid_file'            => ( is => 'ro', lazy_build => 1 );
-has 'port'                => ( is => 'ro', required   => 1 );
+has 'port'                => ( is => 'ro', lazy_build => 1 );
 has 'root_dir'            => ( is => 'ro' );
 has 'use_sudo'            => ( is => 'ro', lazy_build => 1 );
 has 'wait_for_start_secs' => ( is => 'ro', default    => 10 );
@@ -36,6 +39,10 @@ use constant {
 #
 # ATTRIBUTE BUILDERS
 #
+
+sub _build_bind_addr {
+    return "localhost";
+}
 
 sub _build_description {
     my $self = shift;
@@ -58,6 +65,10 @@ sub _build_pid_file {
     die "cannot determine pid_file";
 }
 
+sub _build_port {
+    die "cannot determine port";
+}
+
 sub _build_use_sudo {
     my $self = shift;
     return $self->port < 1024;
@@ -70,13 +81,17 @@ sub _build_use_sudo {
 sub handle_cmdline {
     my ( $self, %params ) = @_;
 
-    my $cmd = $params{cmd} || $ARGV[0];
+    my $cmd =
+         $params{cmd}
+      || $ARGV[0]
+      || die "no cmd passed and ARGV[0] is empty";
     my $verbose = $params{verbose};
 
     my $dispatcher = Log::Dispatch->new();
     $dispatcher->add(
         Log::Dispatch::Screen->new(
             name      => 'screen',
+            stderr    => 0,
             min_level => $verbose ? 'debug' : 'info',
             callbacks => sub { my %params = @_; "$params{message}\n" }
         )
@@ -264,11 +279,13 @@ sub is_running {
             return $proc;
         }
         else {
-            $log->infof(
-                "pid file '%s' contains a non-existing process id '%d'!",
-                $pid_file, $pid );
-            $self->_handle_corrupt_pid_file();
-            return undef;
+            if ( -f $pid_file ) {
+                $log->infof(
+                    "pid file '%s' contains a non-existing process id '%d'!",
+                    $pid_file, $pid );
+                $self->_handle_corrupt_pid_file();
+                return undef;
+            }
         }
     }
 }
@@ -357,8 +374,7 @@ Server::Control -- Flexible apachectl style control for servers
     use Server::Control::Apache;
 
     my $apache = Server::Control::Apache->new(
-        root_dir     => '/my/apache/dir',
-        port         => 80
+        conf_file => '/my/apache/dir/conf/httpd.conf'
     );
     if ( !$apache->is_running() ) {
         $apache->start();
@@ -368,7 +384,7 @@ Server::Control -- Flexible apachectl style control for servers
 
 C<Server::Control> allows you to control servers in the spirit of apachectl,
 where a server is any background process which listens to a port and has a pid
-file.
+file. It is designed to be subclassed for different types of servers.
 
 =head1 FEATURES
 
@@ -395,7 +411,6 @@ Uses sudo by default when using restricted (< 1024) port
 
 =head1 AVAILABLE SUBCLASSES
 
-C<Server::Control> is designed to be subclassed for different types of servers.
 The following subclasses are currently available as part of this distribution:
 
 =over
@@ -420,7 +435,10 @@ implementation stabilizes.
 
 =head1 CONSTRUCTOR
 
-You can pass the following common options to the constructor:
+You can pass the following common options to the constructor. Some subclasses
+can deduce some of these options without needing an explicit value passed in.
+For example, L<Server::Control::Apache|Server::Control::Apache> can deduce many
+of these from the Apache conf file.
 
 =over
 
@@ -447,12 +465,13 @@ otherwise undef.
 
 =item pid_file
 
-Path to pid file.
+Path to pid file. Will throw an error if this cannot be determined.
 
 =item port
 
 At least one port that server will listen to, so that C<Server::Control> can
-check it on start/stop. Required. See also L</bind_addr>.
+check it on start/stop. Will throw an error if this cannot be determined. See
+also L</bind_addr>.
 
 =item root_dir
 
@@ -498,14 +517,25 @@ Restart the server (by stopping it, then starting it).
 
 Log the server's status.
 
-=item handle_cmdline ($cmd, $verbose)
+=item handle_cmdline (params)
 
-Helper method to process a command-line command for a script like apachectl. If
-I<$cmd> is one of start, stop, restart, or ping, it will be called on the
-object; otherwise, an appropriate usage error will be thrown. This method will
-also cause messages to be logged to STDOUT, as is expected for a command-line
-script. I<$verbose> is a boolean indicating whether the log level will be set
-to 'debug' or 'info'.
+Helper method to process a command-line command for a script like apachectl.
+Takes the following key/value parameters:
+
+=over
+
+=item *
+
+I<cmd> - one of start, stop, restart, or ping. It will be called on the
+Server::Control object. An appropriate usage error will be thrown for a bad
+command. If I<cmd> is not specified, it will be taken from $ARGV[0].
+
+=item *
+
+I<$verbose> - a boolean indicating whether the log level will be set to 'debug'
+or 'info'. Would typically come from a -v or --verbose switch. Default false.
+
+=back
 
 =back
 

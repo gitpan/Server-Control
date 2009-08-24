@@ -5,8 +5,7 @@ SYNOPSIS
         use Server::Control::Apache;
 
         my $apache = Server::Control::Apache->new(
-            root_dir     => '/my/apache/dir',
-            port         => 80
+            conf_file => '/my/apache/dir/conf/httpd.conf'
         );
         if ( !$apache->is_running() ) {
             $apache->start();
@@ -15,7 +14,8 @@ SYNOPSIS
 DESCRIPTION
     `Server::Control' allows you to control servers in the spirit of
     apachectl, where a server is any background process which listens to a
-    port and has a pid file.
+    port and has a pid file. It is designed to be subclassed for different
+    types of servers.
 
 FEATURES
     *   Checks server status in multiple ways (looking for an active
@@ -28,9 +28,8 @@ FEATURES
     *   Uses sudo by default when using restricted (< 1024) port
 
 AVAILABLE SUBCLASSES
-    `Server::Control' is designed to be subclassed for different types of
-    servers. The following subclasses are currently available as part of
-    this distribution:
+    The following subclasses are currently available as part of this
+    distribution:
 
     *   Server::Control::Apache - Apache httpd
 
@@ -42,7 +41,10 @@ AVAILABLE SUBCLASSES
     implementation stabilizes.
 
 CONSTRUCTOR
-    You can pass the following common options to the constructor:
+    You can pass the following common options to the constructor. Some
+    subclasses can deduce some of these options without needing an explicit
+    value passed in. For example, Server::Control::Apache can deduce many of
+    these from the Apache conf file.
 
     bind_addr
         At least one address that the server binds to, so that
@@ -63,12 +65,12 @@ CONSTRUCTOR
         defined, otherwise undef.
 
     pid_file
-        Path to pid file.
+        Path to pid file. Will throw an error if this cannot be determined.
 
     port
         At least one port that server will listen to, so that
-        `Server::Control' can check it on start/stop. Required. See also
-        bind_addr.
+        `Server::Control' can check it on start/stop. Will throw an error if
+        this cannot be determined. See also bind_addr.
 
     root_dir
         Root directory of server, for conf files, log files, etc. This will
@@ -101,14 +103,18 @@ METHODS
     ping
         Log the server's status.
 
-    handle_cmdline ($cmd, $verbose)
+    handle_cmdline (params)
         Helper method to process a command-line command for a script like
-        apachectl. If *$cmd* is one of start, stop, restart, or ping, it
-        will be called on the object; otherwise, an appropriate usage error
-        will be thrown. This method will also cause messages to be logged to
-        STDOUT, as is expected for a command-line script. *$verbose* is a
-        boolean indicating whether the log level will be set to 'debug' or
-        'info'.
+        apachectl. Takes the following key/value parameters:
+
+        *   *cmd* - one of start, stop, restart, or ping. It will be called
+            on the Server::Control object. An appropriate usage error will
+            be thrown for a bad command. If *cmd* is not specified, it will
+            be taken from $ARGV[0].
+
+        *   *$verbose* - a boolean indicating whether the log level will be
+            set to 'debug' or 'info'. Would typically come from a -v or
+            --verbose switch. Default false.
 
   Status methods
 
