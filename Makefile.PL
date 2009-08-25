@@ -23,6 +23,7 @@ requires 'File::Slurp'                 => '9999.13';
 requires 'File::Spec::Functions'       => 0;
 requires 'File::Temp'                  => 0;
 requires 'File::Which'                 => 0;
+requires 'Hash::MoreUtils'             => 0;
 requires 'IO::Socket'                  => 0;
 requires 'IPC::System::Simple'         => '1.18';
 requires 'List::MoreUtils'             => '0.13';
@@ -30,6 +31,13 @@ requires 'Log::Any::Adapter::Dispatch' => '0.03';
 requires 'Moose'                       => '0.66';
 requires 'Proc::ProcessTable'          => '0.42';
 requires 'Time::HiRes'                 => 0;
+
+install_script 'bin/apachectlp';
+
+no_index directory => 'lib/Server/Control/t';
+no_index package => 'Server::Control::Util';
+
+extra_tests;
 
 license 'perl';
 

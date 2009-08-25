@@ -26,13 +26,18 @@ name: Server-Control
 no_index:
   directory:
     - inc
+    - lib/Server/Control/t
     - t
+    - xt
+  package:
+    - Server::Control::Util
 requires:
   Apache::ConfigParser: 1.01
   File::Slurp: 9999.13
   File::Spec::Functions: 0
   File::Temp: 0
   File::Which: 0
+  Hash::MoreUtils: 0
   IO::Socket: 0
   IPC::System::Simple: 1.18
   List::MoreUtils: 0.13
@@ -43,4 +48,4 @@ requires:
   perl: 5.6.0
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.02
+version: 0.03

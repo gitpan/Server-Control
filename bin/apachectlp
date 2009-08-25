@@ -1,7 +1,6 @@
 #!/usr/bin/perl -w
 use strict;
 use Server::Control::Apache;
-use Server::Control::Util qw(dp);
 use Hash::MoreUtils qw(slice_def);
 use Getopt::Long qw(GetOptions);
 my ( $help, $cmd, $verbose, %ctlopts );
@@ -79,9 +78,9 @@ Required options: -k, and either -d or -f.
  -v, --verbose       Show verbose output
  -c, --class         Specify a customized class to use instead of Server::Control::Apache
 
-L<Server::Control|Server::Control> uses these values for features and usually
-gets them by parsing the configuration file, but you may pass any of them if
-the parsing isn't working.
+L<Server::Control|Server::Control> needs the values below and usually gets them
+by parsing the configuration file, but you may pass any of them if the parsing
+isn't working.
 
  --bind-addr
  --error-log

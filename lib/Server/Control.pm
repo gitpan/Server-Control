@@ -11,7 +11,7 @@ use Time::HiRes qw(usleep);
 use strict;
 use warnings;
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 # Note: In some cases we use lazy_build rather than specifying required or a
 # default, to make life easier for subclasses.
@@ -397,11 +397,11 @@ contacting the server's port)
 
 =item *
 
-Tails the error log when server fails to start
+Detects and handles corrupt or out-of-date pid files
 
 =item *
 
-Detects and handles corrupt or out-of-date pid files
+Tails the error log when server fails to start
 
 =item *
 
@@ -658,10 +658,15 @@ is listening (via lsof, fuser, etc.)
 
 =item *
 
-Possibly add pre- and post- start and stop augment hooks like
-L<MooseX::Control|MooseX::Control>
+Write a plugin to dynamically generate conf files
 
 =back
+
+=head1 ACKNOWLEDGMENTS
+
+This module was developed for the Digital Media group of the Hearst
+Corporation, a diversified media company based in New York City.  Many thanks
+to Hearst management for agreeing to this open source release.
 
 =head1 AUTHOR
 

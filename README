@@ -21,9 +21,9 @@ FEATURES
     *   Checks server status in multiple ways (looking for an active
         process, contacting the server's port)
 
-    *   Tails the error log when server fails to start
-
     *   Detects and handles corrupt or out-of-date pid files
+
+    *   Tails the error log when server fails to start
 
     *   Uses sudo by default when using restricted (< 1024) port
 
@@ -194,8 +194,12 @@ TO DO
     *   When a port is being listened to unexpectedly, attempt to report
         which process is listening (via lsof, fuser, etc.)
 
-    *   Possibly add pre- and post- start and stop augment hooks like
-        MooseX::Control
+    *   Write a plugin to dynamically generate conf files
+
+ACKNOWLEDGMENTS
+    This module was developed for the Digital Media group of the Hearst
+    Corporation, a diversified media company based in New York City. Many
+    thanks to Hearst management for agreeing to this open source release.
 
 AUTHOR
     Jonathan Swartz
