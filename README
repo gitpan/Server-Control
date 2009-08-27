@@ -27,6 +27,9 @@ FEATURES
 
     *   Uses sudo by default when using restricted (< 1024) port
 
+    *   With Unix::Lsof installed, reports what is listening to a port when
+        it is busy
+
 AVAILABLE SUBCLASSES
     The following subclasses are currently available as part of this
     distribution:
@@ -67,6 +70,10 @@ CONSTRUCTOR
     pid_file
         Path to pid file. Will throw an error if this cannot be determined.
 
+    poll_for_status_secs
+        Number of seconds (can be fractional) between status checks when
+        waiting for server start or stop. Defaults to 0.2.
+
     port
         At least one port that server will listen to, so that
         `Server::Control' can check it on start/stop. Will throw an error if
@@ -80,13 +87,9 @@ CONSTRUCTOR
         Whether to use 'sudo' when attempting to start and stop server.
         Defaults to true if *port* < 1024, false otherwise.
 
-    wait_for_start_secs
-        Number of seconds to wait for server start before reporting error.
-        Defaults to 10.
-
-    wait_for_stop_secs
-        Number of seconds to wait for server stop before reporting error.
-        Defaults to 10.
+    wait_for_status_secs
+        Number of seconds to wait for server start or stop before reporting
+        error. Defaults to 10.
 
 METHODS
   Action methods
@@ -191,9 +194,6 @@ RELATED MODULES
         use MooseX::Control
 
 TO DO
-    *   When a port is being listened to unexpectedly, attempt to report
-        which process is listening (via lsof, fuser, etc.)
-
     *   Write a plugin to dynamically generate conf files
 
 ACKNOWLEDGMENTS

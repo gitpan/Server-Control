@@ -31,6 +31,8 @@ no_index:
     - xt
   package:
     - Server::Control::Util
+recommends:
+  Unix::Lsof: 0.0.9
 requires:
   Apache::ConfigParser: 1.01
   File::Slurp: 9999.13
@@ -43,9 +45,10 @@ requires:
   List::MoreUtils: 0.13
   Log::Any::Adapter::Dispatch: 0.03
   Moose: 0.66
+  Pod::Usage: 0
   Proc::ProcessTable: 0.42
   Time::HiRes: 0
   perl: 5.6.0
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.03
+version: 0.04
