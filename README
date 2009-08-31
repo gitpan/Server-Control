@@ -152,9 +152,11 @@ METHODS
         running"
 
 LOGGING
-    `Server::Control' uses Log::Any for logging, so you have control over
-    where logs will be sent, if anywhere. The exception is handle_cmdline,
-    which will tell `Log::Any' to send logs to STDOUT.
+    `Server::Control' uses Log::Any for logging events. See Log::Any
+    documentation for how to control where logs get sent, if anywhere.
+
+    The exception is handle_cmdline, which will tell `Log::Any' to send logs
+    to STDOUT.
 
 IMPLEMENTING SUBCLASSES
     `Server::Control' uses Moose, so ideally subclasses will as well. See

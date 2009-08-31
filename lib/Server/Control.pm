@@ -12,7 +12,7 @@ use Server::Control::Util qw(is_port_active something_is_listening_msg);
 use strict;
 use warnings;
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 # Note: In some cases we use lazy_build rather than specifying required or a
 # default, to make life easier for subclasses.
@@ -600,9 +600,12 @@ Returns status as a human-readable string, e.g. "server 'foo' is not running"
 
 =head1 LOGGING
 
-C<Server::Control> uses L<Log::Any|Log::Any> for logging, so you have control
-over where logs will be sent, if anywhere. The exception is L</handle_cmdline>,
-which will tell C<Log::Any> to send logs to STDOUT.
+C<Server::Control> uses L<Log::Any|Log::Any> for logging events. See
+L<Log::Any|Log::Any> documentation for how to control where logs get sent, if
+anywhere.
+
+The exception is L</handle_cmdline>, which will tell C<Log::Any> to send logs
+to STDOUT.
 
 =head1 IMPLEMENTING SUBCLASSES
 
