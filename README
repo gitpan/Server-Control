@@ -54,10 +54,6 @@ CONSTRUCTOR
         `Server::Control' can check it on start/stop. Defaults to
         `localhost'. See also port.
 
-    description
-        Description of the server to be used in output and logs. A generic
-        default will be chosen if none is provided.
-
     error_log
         Location of error log. Defaults to *log_dir*/error_log if *log_dir*
         is defined, otherwise undef. When a server fails to start,
@@ -66,6 +62,11 @@ CONSTRUCTOR
     log_dir
         Location of logs. Defaults to *root_dir*/logs if *root_dir* is
         defined, otherwise undef.
+
+    name
+        Name of the server to be used in output and logs. A generic default
+        will be chosen if none is provided, based on either root_dir or the
+        classname.
 
     pid_file
         Path to pid file. Will throw an error if this cannot be determined.

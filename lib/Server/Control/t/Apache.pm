@@ -1,6 +1,7 @@
 package Server::Control::t::Apache;
 use base qw(Server::Control::t::Base);
 use Cwd qw(realpath);
+use File::Basename;
 use File::Path;
 use File::Slurp qw(write_file);
 use File::Which;
@@ -38,7 +39,7 @@ sub create_ctl {
     return Server::Control::Apache->new( root_dir => $temp_dir );
 }
 
-sub test_build_default : Test(5) {
+sub test_build_default : Test(6) {
     my $self = shift;
 
     my $ctl      = $self->{ctl};
@@ -47,6 +48,11 @@ sub test_build_default : Test(5) {
         "determined conf_file from server root" );
     is( $ctl->bind_addr, "localhost",   "determined bind_addr from default" );
     is( $ctl->port,      $self->{port}, "determined port from conf file" );
+    is(
+        $ctl->description,
+        sprintf( "server '%s'", basename($temp_dir) ),
+        "determine description from server root"
+    );
     is_realpath( $ctl->pid_file, "$temp_dir/logs/my-httpd.pid",
         "determined pid_file from conf file" );
     like(
@@ -56,7 +62,7 @@ sub test_build_default : Test(5) {
     );
 }
 
-sub test_build_alternate : Test(5) {
+sub test_build_alternate : Test(6) {
     my $self = shift;
 
     my $temp_dir = $self->{temp_dir} . "/alternate";
@@ -68,12 +74,15 @@ sub test_build_alternate : Test(5) {
     ";
     my $conf_file = "$temp_dir/conf/httpd.conf";
     write_file( $conf_file, $conf );
-    my $ctl = Server::Control::Apache->new( conf_file => $conf_file );
+    my $ctl =
+      Server::Control::Apache->new( conf_file => $conf_file, name => 'foo' );
     is( $ctl->root_dir,  $temp_dir, "determined root_dir from conf file" );
     is( $ctl->bind_addr, "1.2.3.4", "determined bind_addr from conf file" );
     is( $ctl->port,      $port,     "determined port from conf file" );
     is( $ctl->pid_file, "$temp_dir/logs/httpd.pid",
         "determined pid_file from default" );
+    is( $ctl->description, "server 'foo'",
+        "determined description from argument" );
     like( $ctl->error_log, qr{$temp_dir/logs/error.log},
         "determined error_log from default" );
 }
