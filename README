@@ -93,7 +93,6 @@ CONSTRUCTOR
 
 METHODS
   Action methods
-
     start
         Start the server. Calls do_start internally.
 
@@ -111,16 +110,14 @@ METHODS
         apachectl. Takes the following key/value parameters:
 
         *   *cmd* - one of start, stop, restart, or ping. It will be called
-            on the Server::Control object. An appropriate usage error will
-            be thrown for a bad command. If *cmd* is not specified, it will
-            be taken from $ARGV[0].
+            on the Server::Control object. Required. An appropriate usage
+            error will be thrown for a bad or missing command.
 
-        *   *$verbose* - a boolean indicating whether the log level will be
+        *   *verbose* - a boolean indicating whether the log level will be
             set to 'debug' or 'info'. Would typically come from a -v or
             --verbose switch. Default false.
 
   Status methods
-
     is_running
         If the server appears running (the pid file exists and contains a
         valid process), returns a Proc::ProcessTable::Process object
@@ -163,7 +160,6 @@ IMPLEMENTING SUBCLASSES
     Server::Control::Apache for an example.
 
   Subclass methods
-
     do_start
         This actually starts the server - it is called by start and must be
         defined by the subclass. Any parameters to start are passed here. If
