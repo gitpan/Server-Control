@@ -2,32 +2,47 @@ package Server::Control;
 use File::Basename;
 use File::Slurp qw(read_file);
 use File::Spec::Functions qw(catdir);
+use Getopt::Long;
+use Hash::MoreUtils qw(slice_def);
 use IPC::System::Simple qw();
 use Log::Any qw($log);
 use Log::Dispatch::Screen;
 use Moose;
+use MooseX::StrictConstructor;
+use Moose::Util::TypeConstraints;
+use Pod::Usage;
 use Proc::ProcessTable;
 use Time::HiRes qw(usleep);
 use Server::Control::Util qw(is_port_active something_is_listening_msg);
+use YAML::Any;
 use strict;
 use warnings;
 
-our $VERSION = '0.07';
+our $VERSION = '0.08';
+
+#
+# ATTRIBUTES
+#
 
 # Note: In some cases we use lazy_build rather than specifying required or a
 # default, to make life easier for subclasses.
 #
-has 'bind_addr'   => ( is => 'ro', lazy_build => 1 );
-has 'description' => ( is => 'ro', lazy_build => 1, init_arg => undef );
-has 'error_log'   => ( is => 'ro', lazy_build => 1 );
-has 'log_dir'     => ( is => 'ro', lazy_build => 1 );
-has 'name'        => ( is => 'ro', lazy_build => 1 );
-has 'pid_file'    => ( is => 'ro', lazy_build => 1 );
-has 'poll_for_status_secs' => ( is => 'ro', default    => 0.2 );
-has 'port'                 => ( is => 'ro', lazy_build => 1 );
-has 'root_dir'             => ( is => 'ro' );
-has 'use_sudo'             => ( is => 'ro', lazy_build => 1 );
-has 'wait_for_status_secs' => ( is => 'ro', default    => 10 );
+has 'bind_addr' => ( is => 'ro', isa => 'Str', lazy_build => 1 );
+has 'description' =>
+  ( is => 'ro', isa => 'Str', lazy_build => 1, init_arg => undef );
+has 'error_log'            => ( is => 'ro', isa => 'Str',  lazy_build => 1 );
+has 'log_dir'              => ( is => 'ro', isa => 'Str',  lazy_build => 1 );
+has 'name'                 => ( is => 'ro', isa => 'Str',  lazy_build => 1 );
+has 'pid_file'             => ( is => 'ro', isa => 'Str',  lazy_build => 1 );
+has 'poll_for_status_secs' => ( is => 'ro', isa => 'Num',  default    => 0.2 );
+has 'port'                 => ( is => 'ro', isa => 'Int',  lazy_build => 1 );
+has 'server_root'          => ( is => 'ro', isa => 'Str' );
+has 'use_sudo'             => ( is => 'ro', isa => 'Bool', lazy_build => 1 );
+has 'wait_for_status_secs' => ( is => 'ro', isa => 'Int',  default    => 10 );
+
+# These are only for command-line. Would like to prevent their use from regular new()...
+#
+has 'action' => ( is => 'ro', isa => 'Str' );
 
 __PACKAGE__->meta->make_immutable();
 
@@ -42,14 +57,36 @@ use constant {
 # ATTRIBUTE BUILDERS
 #
 
-sub _build_bind_addr {
-    return "localhost";
+# See if there is an rc_file, in serverctlrc parameter or in
+# server_root/serverctl.yml; if so, read from it and merge with parameters
+# passed to constructor.
+#
+sub BUILDARGS {
+    my $class  = shift;
+    my %params = @_;
+
+    my $rc_file = delete( $params{serverctlrc} )
+      || ( defined( $params{server_root} )
+        && "$params{server_root}/serverctl.yml" );
+    if ( defined $rc_file && -f $rc_file ) {
+        if ( defined( my $rc_params = YAML::Any::LoadFile($rc_file) ) ) {
+            die "expected hashref from rc_file '$rc_file', got '$rc_params'"
+              unless ref($rc_params) eq 'HASH';
+            %$rc_params =
+              map { my $val = $rc_params->{$_}; s/\-/_/g; ( $_, $val ) }
+              keys(%$rc_params);
+            %params = ( %$rc_params, %params );
+            $log->debugf( "found rc file '%s' with these parameters: %s",
+                $rc_file, $rc_params )
+              if $log->is_debug;
+        }
+    }
+
+    return $class->SUPER::BUILDARGS(%params);
 }
 
-sub _build_description {
-    my $self = shift;
-    my $name = $self->name;
-    return "server '$name'";
+sub _build_bind_addr {
+    return "localhost";
 }
 
 sub _build_error_log {
@@ -58,17 +95,24 @@ sub _build_error_log {
       defined( $self->log_dir ) ? catdir( $self->log_dir, "error_log" ) : undef;
 }
 
+sub _build_description {
+    my $self = shift;
+    my $name = $self->name;
+    return "server '$name'";
+}
+
 sub _build_log_dir {
     my $self = shift;
-    return
-      defined( $self->root_dir ) ? catdir( $self->root_dir, "logs" ) : undef;
+    return defined( $self->server_root )
+      ? catdir( $self->server_root, "logs" )
+      : undef;
 }
 
 sub _build_name {
     my $self = shift;
     my $name;
-    if ( defined( my $root_dir = $self->root_dir ) ) {
-        $name = basename($root_dir);
+    if ( defined( my $server_root = $self->server_root ) ) {
+        $name = basename($server_root);
     }
     else {
         ( $name = ref($self) ) =~ s/^Server::Control:://;
@@ -93,39 +137,13 @@ sub _build_use_sudo {
 # PUBLIC METHODS
 #
 
-sub handle_cmdline {
-    my ( $self, %params ) = @_;
-
-    my $cmd = $params{cmd} || die "no cmd passed";
-    my $verbose = $params{verbose};
-
-    my $dispatcher = Log::Dispatch->new();
-    $dispatcher->add(
-        Log::Dispatch::Screen->new(
-            name      => 'screen',
-            stderr    => 0,
-            min_level => $verbose ? 'debug' : 'info',
-            callbacks => sub { my %params = @_; "$params{message}\n" }
-        )
-    );
-    Log::Any->set_adapter( 'Dispatch', dispatcher => $dispatcher );
-    my @valid_commands = $self->_valid_commands;
-
-    if ( defined($cmd) && grep { $_ eq $cmd } @valid_commands ) {
-        $self->$cmd();
-    }
-    else {
-        die sprintf( "bad command '%s': must be one of %s",
-            $cmd, join( ", ", map { "'$_'" } @valid_commands ) );
-    }
-}
-
 sub start {
     my $self = shift;
 
     if ( my $proc = $self->is_running() ) {
-        $log->warnf( "%s already running (pid %d)",
-            $self->description(), $proc->pid );
+        ( my $status = $self->status_as_string() ) =~
+          s/running/already running/;
+        $log->warnf($status);
         return;
     }
     elsif ( $self->is_listening() ) {
@@ -296,7 +314,7 @@ sub is_listening {
     return $is_listening;
 }
 
-sub run_command {
+sub run_system_command {
     my ( $self, $cmd ) = @_;
 
     if ( $self->use_sudo() ) {
@@ -306,13 +324,58 @@ sub run_command {
     IPC::System::Simple::run($cmd);
 }
 
+sub valid_cli_actions {
+    return qw(start stop restart ping);
+}
+
+sub handle_cli {
+    my $class = shift;
+
+    # Allow caller to specify alternate class with --class
+    #
+    my $alternate_class;
+    $class->_cli_get_options( [ 'class=s' => \$alternate_class ],
+        ['pass_through'] );
+    if ( defined $alternate_class ) {
+        Class::MOP::load_class($alternate_class);
+        return $alternate_class->handle_cli();
+    }
+
+    # Create object based on @ARGV options
+    #
+    my $self = $class->new_with_options(@_);
+
+    # Validate and perform specified action
+    #
+    $self->_perform_cli_action();
+}
+
+# This method and its helpers are modelled after MooseX::Getopt, which
+# unfortunately I found both too flaky and not completely suited to my needs.
+# If and when things improve, we can hopefully drop it in as a replacement.
+#
+sub new_with_options {
+    my ( $class, %passed_params ) = @_;
+
+    # Get params from command-line
+    #
+    my %option_pairs = $class->_cli_option_pairs();
+    my %cli_params   = $class->_cli_parse_argv( \%option_pairs );
+
+    # Start logging to stdout with appropriate log level
+    #
+    $class->_setup_cli_logging( \%cli_params );
+    delete( @cli_params{qw(quiet verbose)} );
+
+    # Combine passed and command-line params, pass to constructor
+    #
+    my %params = ( %passed_params, %cli_params );
+    return $class->new(%params);
+}
+
 #
 # PRIVATE METHODS
 #
-
-sub _valid_commands {
-    return qw(start stop restart ping);
-}
 
 sub _start_error_log_watch {
     my ($self) = @_;
@@ -369,6 +432,91 @@ sub _handle_corrupt_pid_file {
     my $pid_file = $self->pid_file();
     $log->infof( "deleting bogus pid file '%s'", $pid_file );
     unlink $pid_file or die "cannot remove '$pid_file': $!";
+}
+
+sub _cli_parse_argv {
+    my ( $class, $option_pairs ) = @_;
+
+    my %cli_params;
+    my @spec =
+      map { $_ => \$cli_params{ $option_pairs->{$_} } } keys(%$option_pairs);
+    $class->_cli_get_options( \@spec, [] );
+    %cli_params = slice_def( \%cli_params, keys(%cli_params) );
+
+    $class->_cli_usage( "", 0 ) if !%cli_params;
+    $class->_cli_usage( "", 1 ) if $cli_params{help};
+
+    return %cli_params;
+}
+
+sub _cli_get_options {
+    my ( $class, $spec, $config ) = @_;
+
+    my $parser = new Getopt::Long::Parser( config => $config );
+    if ( !$parser->getoptions(@$spec) ) {
+        $class->_cli_usage("");
+    }
+}
+
+sub _cli_option_pairs {
+    return (
+        'bind-addr=s'            => 'bind_addr',
+        'd|server-root=s'        => 'server_root',
+        'error-log=s'            => 'error_log',
+        'h|help'                 => 'help',
+        'k|action=s'             => 'action',
+        'log-dir=s'              => 'log_dir',
+        'name=s'                 => 'name',
+        'pid-file=s'             => 'pid_file',
+        'port=s'                 => 'port',
+        'q|quiet'                => 'quiet',
+        'use-sudo=s'             => 'use_sudo',
+        'v|verbose'              => 'verbose',
+        'wait-for-status-secs=s' => 'wait_for_status_secs',
+    );
+}
+
+sub _setup_cli_logging {
+    my ( $self, $cli_params ) = @_;
+
+    my $log_level =
+        $cli_params->{verbose} ? 'debug'
+      : $cli_params->{quiet}   ? 'warning'
+      :                          'info';
+    my $dispatcher =
+      Log::Dispatch->new( outputs =>
+          [ [ 'Screen', stderr => 0, min_level => $log_level, newline => 1 ] ]
+      );
+    Log::Any->set_adapter( 'Dispatch', dispatcher => $dispatcher );
+}
+
+sub _perform_cli_action {
+    my ($self) = @_;
+    my $action = $self->action;
+
+    if ( !defined $action ) {
+        $self->_cli_usage("must specify -k");
+    }
+    elsif ( !grep { $_ eq $action } $self->valid_cli_actions ) {
+        $self->_cli_usage(
+            sprintf(
+                "invalid action '%s' - must be one of %s",
+                $action,
+                join( ", ", ( map { "'$_'" } $self->valid_cli_actions ) )
+            )
+        );
+    }
+    else {
+        $self->$action();
+    }
+}
+
+sub _cli_usage {
+    my ( $class, $msg, $verbose ) = @_;
+
+    $msg     ||= "";
+    $verbose ||= 0;
+    pod2usage( -msg => $msg, -verbose => $verbose, -exitval => 2 );
 }
 
 1;
@@ -433,28 +581,32 @@ The following subclasses are currently available as part of this distribution:
 
 =item *
 
-L<Server::Control::Apache|Server::Control::Apache> - Apache httpd
+L<Server::Control::Apache> - Apache httpd
 
 =item *
 
-L<Server::Control::Apache|Server::Control::HTTPServerSimple> -
-HTTP::Server::Simple server
+L<Server::Control::HTTPServerSimple> - HTTP::Server::Simple server
 
 =item *
 
-L<Server::Control::Apache|Server::Control::NetServer> - Net::Server server
+L<Server::Control::NetServer> - Net::Server server
 
 =back
 
 These will probably be moved into their own distributions once the
 implementation stabilizes.
 
-=head1 CONSTRUCTOR
+=for readme stop
 
-You can pass the following common options to the constructor. Some subclasses
-can deduce some of these options without needing an explicit value passed in.
-For example, L<Server::Control::Apache|Server::Control::Apache> can deduce many
-of these from the Apache conf file.
+=head1 CONSTRUCTOR PARAMETERS
+
+You can pass the following common parameters to the constructor, or include
+them in an L<serverctlrc|rc file>.
+
+Some subclasses can deduce some of these parameters without needing an explicit
+value passed in.  For example,
+L<Server::Control::Apache|Server::Control::Apache> can deduce many of these
+from the Apache conf file.
 
 =over
 
@@ -471,13 +623,13 @@ attempts to show recent messages in the error log.
 
 =item log_dir
 
-Location of logs. Defaults to I<root_dir>/logs if I<root_dir> is defined,
+Location of logs. Defaults to I<server_root>/logs if I<server_root> is defined,
 otherwise undef.
 
 =item name
 
 Name of the server to be used in output and logs. A generic default will be
-chosen if none is provided, based on either L</root_dir> or the classname.
+chosen if none is provided, based on either L</server_root> or the classname.
 
 =item pid_file
 
@@ -494,10 +646,23 @@ At least one port that server will listen to, so that C<Server::Control> can
 check it on start/stop. Will throw an error if this cannot be determined. See
 also L</bind_addr>.
 
-=item root_dir
+=item server_root
 
 Root directory of server, for conf files, log files, etc. This will affect
-defaults of other options like I<log_dir>.
+defaults of other parameters like I<log_dir>.
+
+=item serverctlrc
+
+Path to an rc file containing, in YAML form, one or parameters to pass to the
+constructor. If not specified, will look for L</server_root>/serverctl.yml.
+e.g.
+
+    # This is my serverctl.yml
+    use_sudo: 1
+    wait_for_status-secs: 5
+
+Parameters passed explicitly to the constructor take precedence over parameters
+in an rc file.
 
 =item use_sudo
 
@@ -533,25 +698,67 @@ Restart the server (by stopping it, then starting it).
 
 Log the server's status.
 
-=item handle_cmdline (params)
+=back
 
-Helper method to process a command-line command for a script like apachectl.
-Takes the following key/value parameters:
+=head2 Command-line processing
+
+=over
+
+=item handle_cli (constructor_params)
+
+Helper method to implement a command-line script like apachectl, including
+processing options from C<@ARGV>. In general the script looks like this:
+
+   #!/usr/bin/perl -w
+   use strict;
+   use Server::Control::Foo;
+
+   Server::Control::Foo->handle_cli();
+
+This will implement a script that
 
 =over
 
 =item *
 
-I<cmd> - one of start, stop, restart, or ping. It will be called on the
-Server::Control object. Required. An appropriate usage error will be thrown for
-a bad or missing command.
+Parses options --bind-addr, --error-log, --server-root, etc. to be fed into
+C<Server::Control::MyServer> constructor. There is one option for each
+constructor parameter, with underscores replaced with dashes.
 
 =item *
 
-I<verbose> - a boolean indicating whether the log level will be set to 'debug'
-or 'info'. Would typically come from a -v or --verbose switch. Default false.
+Parses options -v|--verbose and -q|--quiet by setting the log level to C<debug>
+and C<warning> respectively
+
+=item *
+
+Parses option --class by forwarding the call from C<Server::Control::Foo> to a
+different class.
+
+=item *
+
+Parses option -h|--help in the usual way
+
+=item *
+
+Gets an action like 'start' from -k|--action, and calls this on the
+C<Server::Control::MyServer> object
+
+=item *
+
+Sends any log output to STDOUT
 
 =back
+
+See L<apachectlp> for an example.
+
+Any parameters passed to C<handle_cli> will be passed to the C<Server::Control>
+constructor, but may be overriden by C<@ARGV> options.
+
+In general, any customization to the default command-line handling is best done
+in your C<Server::Control> subclass rather than the script itself. For example,
+see L<Server::Control::Apache|Server::Control::Apache> and its overriding of
+C<_cli_option_pairs>.
 
 =back
 
@@ -609,8 +816,8 @@ C<Server::Control> uses L<Log::Any|Log::Any> for logging events. See
 L<Log::Any|Log::Any> documentation for how to control where logs get sent, if
 anywhere.
 
-The exception is L</handle_cmdline>, which will tell C<Log::Any> to send logs
-to STDOUT.
+The exception is L</handle_cli>, which will tell C<Log::Any> to send logs to
+STDOUT.
 
 =head1 IMPLEMENTING SUBCLASSES
 
@@ -625,7 +832,7 @@ L<Server::Control::Apache|Server::Control::Apache> for an example.
 
 This actually starts the server - it is called by L</start> and must be defined
 by the subclass. Any parameters to L</start> are passed here. If your server is
-started via the command-line, you may want to use L</run_command>.
+started via the command-line, you may want to use L</run_system_command>.
 
 =item do_stop ($proc)
 
@@ -634,12 +841,14 @@ the subclass. By default, it will send a SIGTERM to the process. I<$proc> is a
 L<Proc::ProcessTable::Process|Proc::ProcessTable::Process> object representing
 the current process, as returned by L</is_running>.
 
-=item run_command ($cmd)
+=item run_system_command ($cmd)
 
 Runs the specified I<$cmd> on the command line. Adds sudo if necessary (see
 L</use_sudo>), logs the command, and throws runtime errors appropriately.
 
 =back
+
+=for readme continue
 
 =head1 RELATED MODULES
 
@@ -672,6 +881,10 @@ L<MooseX::Control|MooseX::Control>
 
 =item *
 
+Add 'refork' action, which kills all children of a forking server
+
+=item *
+
 Write a plugin to dynamically generate conf files
 
 =back
@@ -690,7 +903,10 @@ Jonathan Swartz
 
 Copyright (C) 2007 Jonathan Swartz, all rights reserved.
 
+Server::Control is provided "as is" and without any express or implied
+warranties, including, without limitation, the implied warranties of
+merchantibility and fitness for a particular purpose.
+
 This program is free software; you can redistribute it and/or modify it under
 the same terms as Perl itself.
 
-=cut

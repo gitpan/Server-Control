@@ -2,6 +2,17 @@ Revision history for Server-Control
 
 ** denotes an incompatible change
 
+0.08  Sep 17, 2009
+
+- ** Rename root_dir to server_root - just more intuitive for existing apache users
+- ** Rename run_command to run_system_command to avoid confusion with cli methods
+- ** Overhaul command-line processing. Rename handle_cmdline to handle_cli and make much
+     more comprehensive; can remove all logic from scripts like apachectlp and easily
+     modify behavior of CLI in subclass
+- Allow optional serverctl.yml file containing constructor options
+- Add --quiet to CLI options to accompany --verbose
+- Use MooseX::StrictConstructor everywhere
+
 0.07  Sep 11, 2009
 
 - Fix apachectlp --bind-addr, --error-log, etc options to actually take values

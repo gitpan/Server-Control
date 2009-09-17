@@ -5,6 +5,8 @@ use File::Spec::Functions qw(catdir catfile);
 use File::Which qw(which);
 use Log::Any qw($log);
 use Moose;
+use MooseX::StrictConstructor;
+use Pod::Usage qw(pod2usage);
 use strict;
 use warnings;
 
@@ -13,7 +15,29 @@ extends 'Server::Control';
 has 'conf_file'     => ( is => 'ro', lazy_build => 1 );
 has 'httpd_binary'  => ( is => 'ro', lazy_build => 1 );
 has 'parsed_config' => ( is => 'ro', lazy_build => 1, init_arg => undef );
-has 'root_dir'      => ( is => 'ro', lazy_build => 1 );
+has 'server_root'   => ( is => 'ro', lazy_build => 1, );
+
+sub _cli_option_pairs {
+    my $class = shift;
+    return (
+        $class->SUPER::_cli_option_pairs,
+        'f|conf-file=s'    => 'conf_file',
+        'b|httpd-binary=s' => 'conf_file',
+    );
+}
+
+around '_cli_parse_argv' => sub {
+    my $orig  = shift;
+    my $class = shift;
+
+    my %cli_params = $class->$orig(@_);
+    if (   !defined( $cli_params{server_root} )
+        && !defined( $cli_params{conf_file} ) )
+    {
+        $class->_cli_usage("must specify one of -d or -f");
+    }
+    return %cli_params;
+};
 
 __PACKAGE__->meta->make_immutable();
 
@@ -21,16 +45,17 @@ sub BUILD {
     my ( $self, $params ) = @_;
 
     # Ensure that we have an existent conf_file after object is built. It
-    # can come from the conf_file or root_dir parameter.
+    # can come from the conf_file or server_root parameter.
     #
     if ( my $conf_file = $self->{conf_file} ) {
         die "no such conf file '$conf_file'" unless -f $conf_file;
-        $self->{conf_file} = realpath( $self->{conf_file} );
+        $self->{conf_file} = realpath($conf_file);
     }
-    elsif ( defined( $self->{root_dir} ) ) {
-        $self->{root_dir} = realpath( $self->{root_dir} );
+    elsif ( my $server_root = $self->{server_root} ) {
+        die "no such server root '$server_root'" unless -d $server_root;
+        $self->{server_root} = realpath($server_root);
         my $default_conf_file =
-          catfile( $self->{root_dir}, "conf", "httpd.conf" );
+          catfile( $self->{server_root}, "conf", "httpd.conf" );
         if ( -f $default_conf_file ) {
             $self->{conf_file} = $default_conf_file;
             $log->debugf( "defaulting conf file to '%s'", $default_conf_file )
@@ -43,7 +68,7 @@ sub BUILD {
         }
     }
     else {
-        die "no conf_file or root_dir specified";
+        die "no conf_file or server_root specified";
     }
 }
 
@@ -73,13 +98,13 @@ sub _build_parsed_config {
     return \%parsed_config;
 }
 
-sub _build_root_dir {
+sub _build_server_root {
     my $self = shift;
-    if ( my $root_dir = $self->parsed_config->{ServerRoot} ) {
-        return $root_dir;
+    if ( my $server_root = $self->parsed_config->{ServerRoot} ) {
+        return $server_root;
     }
     else {
-        die "no root_dir specified and cannot determine from conf file";
+        die "no server_root specified and cannot determine from conf file";
     }
 }
 
@@ -149,7 +174,7 @@ sub run_httpd_command {
     my $conf_file    = $self->conf_file();
 
     my $cmd = "$httpd_binary -k $command -f $conf_file";
-    $self->run_command($cmd);
+    $self->run_system_command($cmd);
 }
 
 1;
@@ -167,7 +192,7 @@ Server::Control::Apache -- Control Apache ala apachtctl
     use Server::Control::Apache;
 
     my $apache = Server::Control::Apache->new(
-        root_dir  => '/my/apache/dir'
+        server_root  => '/my/apache/dir'
        # OR    
         conf_file => '/my/apache/dir/conf/httpd.conf'
     );
@@ -181,8 +206,8 @@ Server::Control::Apache is a subclass of Server::Control for Apache httpd
 processes. It has the same basic function as apachectl, only with a richer
 feature set.
 
-This module has an associated binary, apachectlp(1), which you may want to use
-instead.
+This module has an associated binary, L<apachectlp|apachectlp>, which you may
+want to use instead.
 
 =head1 CONSTRUCTOR
 
@@ -198,9 +223,9 @@ uses the first one found.
 
 =item conf_file
 
-Path to conf file. Will try to use L<Server::Control/root_dir>/conf/httpd.conf
-if C<root_dir> was specified and C<conf_file> was not. Throws an error if it
-cannot be determined.
+Path to conf file. Will try to use
+L<Server::Control/server_root>/conf/httpd.conf if C<server_root> was specified
+and C<conf_file> was not. Throws an error if it cannot be determined.
 
 =back
 
