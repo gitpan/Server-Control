@@ -37,6 +37,7 @@ requires 'Time::HiRes'                 => 0;
 requires 'YAML::Any'                   => 0;
 
 recommends 'Unix::Lsof'                => '0.0.9';
+recommends 'MooseX::Traits'            => '0.07';
 
 install_script 'bin/apachectlp';
 

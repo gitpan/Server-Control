@@ -103,6 +103,58 @@ sub test_missing_params : Test(1) {
     qr/no conf_file or server_root specified/;
 }
 
+sub test_graceful_stop : Tests(4) {
+    my $self = shift;
+    my $ctl  = $self->{ctl};
+    my $log  = $self->{log};
+
+    $ctl->start();
+    ok( $ctl->is_running(), "is running" );
+    $ctl->graceful_stop();
+    $log->contains_ok(qr/stopped/);
+    ok( !$ctl->is_running(), "not running" );
+    is( $ctl->stop_cmd(), 'graceful-stop' );
+}
+
+sub test_graceful_restart : Tests(5) {
+    my $self = shift;
+    my $ctl  = $self->{ctl};
+
+    $self->setup_test_logger('debug');
+    my $log = $self->{log};
+
+    $ctl->start();
+    ok( $ctl->is_running(), "is running" );
+    $log->clear();
+    $ctl->graceful();
+    $log->contains_ok(qr/running '.*-k graceful.*'/);
+    $log->contains_ok(qr/waiting for server graceful restart/);
+    ok( $ctl->is_running(), "is running" );
+    $ctl->stop();
+    ok( !$ctl->is_running(), "is not running" );
+}
+
+sub test_cli_parse_argv : Tests(1) {
+    my ($self) = @_;
+
+    local @ARGV = ( split( ' ', '-f 1 -b 2 -d 3 -k 4 --name 5 --port 6 -v' ) );
+    my $class        = 'Server::Control::Apache';
+    my %option_pairs = $class->_cli_option_pairs();
+    my %cli_params   = $class->_cli_parse_argv( \%option_pairs );
+    is_deeply(
+        \%cli_params,
+        {
+            conf_file    => 1,
+            httpd_binary => 2,
+            server_root  => 3,
+            action       => 4,
+            name         => 5,
+            port         => 6,
+            verbose      => 1
+        }
+    );
+}
+
 sub is_realpath {
     my ( $path1, $path2, $name ) = @_;
 

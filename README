@@ -17,6 +17,10 @@ DESCRIPTION
     port and has a pid file. It is designed to be subclassed for different
     types of servers.
 
+    The original motivation was to eliminate all those little annoyances
+    that can occur when starting and stopping a server doesn't quite go
+    right.
+
 FEATURES
     *   Checks server status in multiple ways (looking for an active
         process, contacting the server's port)
@@ -27,8 +31,8 @@ FEATURES
 
     *   Uses sudo by default when using restricted (< 1024) port
 
-    *   With Unix::Lsof installed, reports what is listening to a port when
-        it is busy
+    *   Reports what is listening to a port when it is busy (with
+        Unix::Lsof)
 
 AVAILABLE SUBCLASSES
     The following subclasses are currently available as part of this
@@ -69,6 +73,9 @@ ACKNOWLEDGMENTS
 
 AUTHOR
     Jonathan Swartz
+
+SEE ALSO
+    serverctlp, Server::Control::Apache
 
 COPYRIGHT & LICENSE
     Copyright (C) 2007 Jonathan Swartz, all rights reserved.

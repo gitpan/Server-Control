@@ -12,17 +12,20 @@ use warnings;
 
 extends 'Server::Control';
 
-has 'conf_file'     => ( is => 'ro', lazy_build => 1 );
-has 'httpd_binary'  => ( is => 'ro', lazy_build => 1 );
+has 'conf_file' => ( is => 'ro', lazy_build => 1, required => 1 );
+has 'httpd_binary' => ( is => 'ro', lazy_build => 1 );
 has 'parsed_config' => ( is => 'ro', lazy_build => 1, init_arg => undef );
-has 'server_root'   => ( is => 'ro', lazy_build => 1, );
+has 'no_parse_config' => ( is => 'ro' );
+has 'server_root'     => ( is => 'ro', lazy_build => 1 );
+has 'stop_cmd'        => ( is => 'rw', init_arg => undef, default => 'stop' );
 
 sub _cli_option_pairs {
     my $class = shift;
     return (
         $class->SUPER::_cli_option_pairs,
         'f|conf-file=s'    => 'conf_file',
-        'b|httpd-binary=s' => 'conf_file',
+        'b|httpd-binary=s' => 'httpd_binary',
+        'no-parse-config'  => 'no_parse_config',
     );
 }
 
@@ -37,6 +40,10 @@ around '_cli_parse_argv' => sub {
         $class->_cli_usage("must specify one of -d or -f");
     }
     return %cli_params;
+};
+
+override 'valid_cli_actions' => sub {
+    return ( super(), qw(graceful graceful-stop) );
 };
 
 __PACKAGE__->meta->make_immutable();
@@ -81,7 +88,9 @@ sub _build_httpd_binary {
 }
 
 sub _build_parsed_config {
-    my $self      = shift;
+    my $self = shift;
+    return {} if $self->no_parse_config;
+
     my $cp        = Apache::ConfigParser->new;
     my $conf_file = $self->conf_file;
     $cp->parse_file($conf_file)
@@ -164,7 +173,43 @@ sub do_start {
 sub do_stop {
     my $self = shift;
 
-    $self->run_httpd_command('stop');
+    $self->run_httpd_command( $self->stop_cmd() );
+}
+
+sub graceful_stop {
+    my $self = shift;
+
+    $self->stop_cmd('graceful-stop');
+    $self->stop();
+}
+
+sub graceful {
+    my $self = shift;
+
+    my $proc = $self->_ensure_is_running() or return;
+    $self->_warn_if_different_user($proc);
+
+    my $error_size_start = $self->_start_error_log_watch();
+
+    eval { $self->run_httpd_command('graceful') };
+    if ( my $err = $@ ) {
+        $log->errorf( "error during graceful restart of %s: %s",
+            $self->description(), $err );
+        $self->_report_error_log_output($error_size_start);
+        return;
+    }
+
+    if (
+        $self->_wait_for_status(
+            Server::Control::ACTIVE(), 'graceful restart'
+        )
+      )
+    {
+        $log->info( $self->status_as_string() );
+    }
+    else {
+        $self->_report_error_log_output($error_size_start);
+    }
 }
 
 sub run_httpd_command {
@@ -216,16 +261,21 @@ except for:
 
 =over
 
-=item httpd_binary
-
-Path to httpd binary. By default, searches for httpd in the user's PATH and
-uses the first one found.
-
 =item conf_file
 
 Path to conf file. Will try to use
 L<Server::Control/server_root>/conf/httpd.conf if C<server_root> was specified
 and C<conf_file> was not. Throws an error if it cannot be determined.
+
+=item httpd_binary
+
+Path to httpd binary. By default, searches for httpd in the user's PATH and
+uses the first one found.
+
+=item no_parse_config
+
+Don't attempt to parse the httpd.conf; only look at values passed in the usual
+ways.
 
 =back
 
@@ -235,13 +285,31 @@ L<Server::Control/port> by parsing the conf file. However, if the parsing
 doesn't work or you wish to override certain values, you can pass them in
 manually.
 
+=head1 METHODS
+
+The following methods are supported in addition to those described in
+L<Server::Control|Server::Control>:
+
+=over
+
+=item graceful
+
+Gracefully restart the server - see
+http://httpd.apache.org/docs/2.2/stopping.html
+
+=item graceful-stop
+
+Gracefully stop the server - see http://httpd.apache.org/docs/2.2/stopping.html
+
+=back
+
 =head1 AUTHOR
 
 Jonathan Swartz
 
 =head1 SEE ALSO
 
-L<apachectlp|apachectlp> L<Server::Control|Server::Control>
+L<apachectlp|apachectlp>, L<Server::Control|Server::Control>
 
 =head1 COPYRIGHT & LICENSE
 

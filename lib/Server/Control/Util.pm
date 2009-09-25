@@ -12,6 +12,8 @@ our @EXPORT_OK = qw(
   process_listening_to_port
   something_is_listening_msg
   kill_my_children
+  kill_children
+  get_child_pids
 );
 
 eval { require Unix::Lsof };
@@ -76,17 +78,35 @@ sub something_is_listening_msg {
         $qualifier, $bind_addr, $port );
 }
 
-# Kill all children of this process - for test cleanup.  NOTE: Doesn't work
-# with apache and other servers that end up with ppid=1
+# Kill all children of this process with TERM - specifically for testing purposes.
 #
 sub kill_my_children {
-    my $pt = new Proc::ProcessTable;
-    if ( my @child_pids = Proc::Killfam::get_pids( $pt->table, $$ ) ) {
-        if ( $ENV{TEST_VERBOSE} ) {
-            printf STDERR "sending TERM to %s\n", join( ", ", @child_pids );
-        }
+    my @child_pids = kill_children($$);
+    if ( $ENV{TEST_VERBOSE} ) {
+        printf STDERR "sending TERM to %s\n", join( ", ", @child_pids )
+          if @child_pids;
+    }
+}
+
+# Kill all children of process $pid with TERM. Return pids killed.
+#
+sub kill_children {
+    my ($pid) = @_;
+
+    my @child_pids = get_child_pids($pid);
+    if (@child_pids) {
         Proc::Killfam::killfam( 15, @child_pids );
     }
+    return @child_pids;
+}
+
+# Return the child pids of process $pid.
+#
+sub get_child_pids {
+    my ($pid) = @_;
+
+    my $pt = new Proc::ProcessTable;
+    return Proc::Killfam::get_pids( $pt->table, $pid );
 }
 
 1;

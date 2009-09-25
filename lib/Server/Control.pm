@@ -13,12 +13,24 @@ use Moose::Util::TypeConstraints;
 use Pod::Usage;
 use Proc::ProcessTable;
 use Time::HiRes qw(usleep);
-use Server::Control::Util qw(is_port_active something_is_listening_msg);
+use Server::Control::Util
+  qw(is_port_active kill_children something_is_listening_msg);
 use YAML::Any;
 use strict;
 use warnings;
 
-our $VERSION = '0.09';
+our $VERSION = '0.10';
+
+# Gives us new_with_traits - only if MooseX::Traits is installed
+#
+eval {
+    with 'MooseX::Traits';
+    has '+_trait_namespace' => ( default => 'Server::Control::Plugin' );
+};
+if ($@) {
+    __PACKAGE__->meta->add_method(
+        new_with_traits => sub { die "MooseX::Traits could not be loaded" } );
+}
 
 #
 # ATTRIBUTES
@@ -43,6 +55,12 @@ has 'wait_for_status_secs' => ( is => 'ro', isa => 'Int',  default    => 10 );
 # These are only for command-line. Would like to prevent their use from regular new()...
 #
 has 'action' => ( is => 'ro', isa => 'Str' );
+
+foreach
+  my $method (qw(successful_start successful_stop failed_start failed_stop))
+{
+    __PACKAGE__->meta->add_method( $method => sub { } );
+}
 
 __PACKAGE__->meta->make_immutable();
 
@@ -144,7 +162,6 @@ sub start {
         ( my $status = $self->status_as_string() ) =~
           s/running/already running/;
         $log->warnf($status);
-        return;
     }
     elsif ( $self->is_listening() ) {
         $log->warnf(
@@ -153,72 +170,76 @@ sub start {
             $self->pid_file(),
             something_is_listening_msg( $self->port, $self->bind_addr )
         );
-        return;
-    }
-
-    my $error_size_start = $self->_start_error_log_watch();
-
-    eval { $self->do_start() };
-    if ( my $err = $@ ) {
-        $log->errorf( "error while trying to start %s: %s",
-            $self->description(), $err );
-        $self->_report_error_log_output($error_size_start);
-        return;
-    }
-
-    if ( $self->_wait_for_status( ACTIVE, 'start' ) ) {
-        ( my $status = $self->status_as_string() ) =~ s/running/now running/;
-        $log->info($status);
     }
     else {
-        $self->_report_error_log_output($error_size_start);
+        my $error_size_start = $self->_start_error_log_watch();
+
+        eval { $self->do_start() };
+        if ( my $err = $@ ) {
+            $log->errorf( "error while trying to start %s: %s",
+                $self->description(), $err );
+            $self->_report_error_log_output($error_size_start);
+        }
+        else {
+            if ( $self->_wait_for_status( ACTIVE, 'start' ) ) {
+                ( my $status = $self->status_as_string() ) =~
+                  s/running/now running/;
+                $log->info($status);
+                $self->successful_start();
+                return 1;
+            }
+            else {
+                $self->_report_error_log_output($error_size_start);
+            }
+        }
     }
+    $self->failed_start();
+    return 0;
 }
 
 sub stop {
     my ($self) = @_;
 
-    my $proc = $self->is_running();
-    unless ($proc) {
-        $log->warn( $self->status_as_string() );
-        return;
-    }
-
-    my ( $uid, $eid ) = ( $<, $> );
-    if ( ( $eid || $uid ) && $proc->uid != $uid && !$self->use_sudo() ) {
-        $log->infof(
-            "warning: process %d is owned by uid %d ('%s'), different than current user %d ('%s'); may not be able to stop server",
-            $proc->pid,
-            $proc->uid,
-            scalar( getpwuid( $proc->uid ) ),
-            $uid,
-            scalar( getpwuid($uid) )
-        );
-    }
+    my $proc = $self->_ensure_is_running() or return 0;
+    $self->_warn_if_different_user($proc);
 
     eval { $self->do_stop($proc) };
     if ( my $err = $@ ) {
         $log->errorf( "error while trying to stop %s: %s",
             $self->description(), $err );
-        return;
     }
-
-    if ( $self->_wait_for_status( INACTIVE, 'stop' ) ) {
+    elsif ( $self->_wait_for_status( INACTIVE, 'stop' ) ) {
         $log->infof( "%s has stopped", $self->description() );
+        $self->successful_stop();
+        return 1;
     }
+    $self->failed_stop();
+    return 0;
 }
 
 sub restart {
     my ($self) = @_;
 
-    $self->stop();
-    if ( $self->is_running() ) {
-        $log->infof( "could not stop %s, will not attempt start",
-            $self->description() );
+    if ( $self->stop() ) {
+        return $self->start();
     }
     else {
-        $self->start();
+        $log->infof( "could not stop %s, will not attempt start",
+            $self->description() );
+        return 0;
     }
+}
+
+sub refork {
+    my ($self) = @_;
+
+    my $proc = $self->_ensure_is_running() or return;
+    my @child_pids = kill_children( $proc->pid );
+    $log->debugf( "sent TERM to children of pid %d (%s)",
+        $proc->pid, join( ", ", @child_pids ) )
+      if $log->is_debug;
+    $log->infof( "reforked %s", $self->description() );
+    return @child_pids;
 }
 
 sub ping {
@@ -331,14 +352,20 @@ sub valid_cli_actions {
 sub handle_cli {
     my $class = shift;
 
-    # Allow caller to specify alternate class with --class
+    # Allow caller to specify subclass with -c|--class and include paths with -I
     #
-    my $alternate_class;
-    $class->_cli_get_options( [ 'class=s' => \$alternate_class ],
-        ['pass_through'] );
-    if ( defined $alternate_class ) {
-        Class::MOP::load_class($alternate_class);
-        return $alternate_class->handle_cli();
+    my ( $subclass, @includes );
+    $class->_cli_get_options(
+        [ 'c|class=s' => \$subclass, 'I=s' => \@includes ],
+        [ 'pass_through', 'no_ignore_case' ] );
+    unshift( @INC, @includes );
+    if ( defined $subclass ) {
+        my $full_subclass =
+            substr( $subclass, 0, 1 ) eq '+'
+          ? substr( $subclass, 1 )
+          : "Server::Control::$subclass";
+        Class::MOP::load_class($full_subclass);
+        return $full_subclass->handle_cli();
     }
 
     # Create object based on @ARGV options
@@ -440,11 +467,12 @@ sub _cli_parse_argv {
     my %cli_params;
     my @spec =
       map { $_ => \$cli_params{ $option_pairs->{$_} } } keys(%$option_pairs);
-    $class->_cli_get_options( \@spec, [] );
+    $class->_cli_get_options( \@spec, ['no_ignore_case'] );
     %cli_params = slice_def( \%cli_params, keys(%cli_params) );
 
     $class->_cli_usage( "", 0 ) if !%cli_params;
     $class->_cli_usage( "", 1 ) if $cli_params{help};
+    $class->_cli_usage("must specify -c|--class") if $class eq __PACKAGE__;
 
     return %cli_params;
 }
@@ -507,7 +535,8 @@ sub _perform_cli_action {
         );
     }
     else {
-        $self->$action();
+        ( my $action_method = $action ) =~ s/\-/_/g;
+        $self->$action_method();
     }
 }
 
@@ -517,6 +546,32 @@ sub _cli_usage {
     $msg     ||= "";
     $verbose ||= 0;
     pod2usage( -msg => $msg, -verbose => $verbose, -exitval => 2 );
+}
+
+sub _ensure_is_running {
+    my ($self) = @_;
+
+    my $proc = $self->is_running();
+    unless ($proc) {
+        $log->warn( $self->status_as_string() );
+    }
+    return $proc;
+}
+
+sub _warn_if_different_user {
+    my ( $self, $proc ) = @_;
+
+    my ( $uid, $eid ) = ( $<, $> );
+    if ( ( $eid || $uid ) && $proc->uid != $uid && !$self->use_sudo() ) {
+        $log->warn(
+            "warning: process %d is owned by uid %d ('%s'), different than current user %d ('%s'); may not be able to stop server",
+            $proc->pid,
+            $proc->uid,
+            scalar( getpwuid( $proc->uid ) ),
+            $uid,
+            scalar( getpwuid($uid) )
+        );
+    }
 }
 
 1;
@@ -546,6 +601,9 @@ C<Server::Control> allows you to control servers in the spirit of apachectl,
 where a server is any background process which listens to a port and has a pid
 file. It is designed to be subclassed for different types of servers.
 
+The original motivation was to eliminate all those little annoyances that can
+occur when starting and stopping a server doesn't quite go right.
+
 =head1 FEATURES
 
 =over
@@ -569,7 +627,7 @@ Uses sudo by default when using restricted (< 1024) port
 
 =item *
 
-With Unix::Lsof installed, reports what is listening to a port when it is busy
+Reports what is listening to a port when it is busy (with Unix::Lsof)
 
 =back
 
@@ -684,15 +742,30 @@ Defaults to 10.
 
 =item start
 
-Start the server. Calls L</do_start> internally.
+Start the server. Calls L</do_start> internally. Returns 1 if the server
+started successfully, 0 if not (e.g. it was already running, or there was an
+error starting it).
 
 =item stop
 
-Stop the server. Calls L</do_stop> internally.
+Stop the server. Calls L</do_stop> internally. Returns 1 if the server stopped
+successfully, 0 if not (e.g. it was already stopped, or there was an error
+stopping it).
 
 =item restart
 
-Restart the server (by stopping it, then starting it).
+Restart the server (by stopping it, then starting it). Returns 1 if the server
+both stopped and started succesfully, 0 if not.
+
+=item refork
+
+Send a C<TERM> signal to the child processes of the server's main process. This
+will force forking servers, such as C<Apache> and C<Net::Server::Prefork>, to
+fork new children. This can serve as a cheap restart in a development
+environment, if the resources you want to refresh are being loaded in the child
+rather than the parent.
+
+Returns the list of child pids that were sent a C<TERM>.
 
 =item ping
 
@@ -706,8 +779,9 @@ Log the server's status.
 
 =item handle_cli (constructor_params)
 
-Helper method to implement a command-line script like apachectl, including
-processing options from C<@ARGV>. In general the script looks like this:
+Helper method to implement a CLI (command-line interface) like apachectl. This
+is used by two scripts that come with this distribution, L<apachectlp> and
+L<serverctlp>. In general the usage looks like this:
 
    #!/usr/bin/perl -w
    use strict;
@@ -715,42 +789,38 @@ processing options from C<@ARGV>. In general the script looks like this:
 
    Server::Control::Foo->handle_cli();
 
-This will implement a script that
+C<handle_cli> will process the following options from C<@ARGV>:
 
 =over
 
 =item *
 
-Parses options --bind-addr, --error-log, --server-root, etc. to be fed into
-C<Server::Control::MyServer> constructor. There is one option for each
-constructor parameter, with underscores replaced with dashes.
+-v|--verbose - set log level to C<debug>
 
 =item *
 
-Parses options -v|--verbose and -q|--quiet by setting the log level to C<debug>
-and C<warning> respectively
+-q|--quiet - set log level to C<warning> respectively
 
 =item *
 
-Parses option --class by forwarding the call from C<Server::Control::Foo> to a
-different class.
+-c|--class - forwards the call to the specified classname. The classname is
+prefixed with "Server::Control::" unless it begins with a "+".
 
 =item *
 
-Parses option -h|--help in the usual way
+-h|--help - prints a help message using L<Pod::Usage|Pod::Usage>
 
 =item *
 
-Gets an action like 'start' from -k|--action, and calls this on the
-C<Server::Control::MyServer> object
+-k|--action - calls this on the C<Server::Control::MyServer> object (required)
 
 =item *
 
-Sends any log output to STDOUT
+Any constructor parameter accepted by C<Server::Control> or the specific
+subclass, with underscores replaced by dashes - e.g. --bind-addr,
+--wait-for-status-secs
 
 =back
-
-See L<apachectlp> for an example.
 
 Any parameters passed to C<handle_cli> will be passed to the C<Server::Control>
 constructor, but may be overriden by C<@ARGV> options.
@@ -759,6 +829,8 @@ In general, any customization to the default command-line handling is best done
 in your C<Server::Control> subclass rather than the script itself. For example,
 see L<Server::Control::Apache|Server::Control::Apache> and its overriding of
 C<_cli_option_pairs>.
+
+Log output is automatically diverted to STDOUT, as would be expected for a CLI.
 
 =back
 
@@ -848,6 +920,72 @@ L</use_sudo>), logs the command, and throws runtime errors appropriately.
 
 =back
 
+=head1 PLUGINS
+
+Because C<Server::Control> uses C<Moose>, it is easy to define plugins that
+modify its methods. If a plugin is meant for public consumption, we recommend
+that it be implemented as a role and named C<Server::Control::Plugin::*>.
+
+In addition to the methods documented above, the following empty hook methods
+are called for plugin convenience:
+
+=over
+
+=item *
+
+successful_start - called when a start() succeeds
+
+=item *
+
+failed_start - called when a start() fails
+
+=item *
+
+successful_stop - called when a stop() succeeds
+
+=item *
+
+failed_stop - called when a stop() fails
+
+=back
+
+C<Server::Control> uses the L<MooseX::Traits|MooseX::Traits> role if it is
+installed, so you can call it with C<new_with_traits()>. The default
+trait_namespace is C<Server::Control::Plugin>.
+
+For example, here is a role that sends an email whenever a server is
+successfully started or stopped:
+
+   package Server::Control::Plugin::EmailOnStatusChange;
+   use Moose::Role;
+   
+   has 'email_status_to' => ( is => 'ro', isa => 'Str', required => 1 );
+   
+   after 'successful_start' => sub {
+       shift->send_email("server started");
+   };
+   after 'successful_stop' => sub {
+       shift->send_email("server stopped");
+   };
+   
+   __PACKAGE__->meta->make_immutable();
+   
+   sub send_email {
+       my ( $self, $subject ) = @_;
+   
+       ...;
+   }
+   
+   1;
+
+and here's how you'd use it:
+
+   my $apache = Server::Control::Apache->new_with_traits(
+       traits          => ['EmailOnStatusChange'],
+       email_status_to => 'joe@domain.org',
+       conf_file       => '/my/apache/dir/conf/httpd.conf'
+   );
+
 =for readme continue
 
 =head1 RELATED MODULES
@@ -898,6 +1036,10 @@ to Hearst management for agreeing to this open source release.
 =head1 AUTHOR
 
 Jonathan Swartz
+
+=head1 SEE ALSO
+
+L<serverctlp|serverctlp>, L<Server::Control::Apache|Server::Control::Apache>
 
 =head1 COPYRIGHT & LICENSE
 
