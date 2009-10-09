@@ -6,6 +6,7 @@ inc/Module/Install.pm
 inc/Module/Install/AutoInstall.pm
 inc/Module/Install/Base.pm
 inc/Module/Install/Can.pm
+inc/Module/Install/ExtraTests.pm
 inc/Module/Install/Fetch.pm
 inc/Module/Install/Include.pm
 inc/Module/Install/Makefile.pm
@@ -33,7 +34,7 @@ t/00-load.t
 t/HTTPServerSimple.t
 t/NetServer.t
 t/Sanity.t
-xt/no-moosex-traits.t
 xt/release/Apache.t
 xt/release/apachectlp.t
+xt/release/no-moosex-traits.t
 xt/release/Util.t

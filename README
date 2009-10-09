@@ -62,9 +62,14 @@ RELATED MODULES
         use MooseX::Control
 
 TO DO
-    *   Add 'refork' action, which kills all children of a forking server
+    *   Plugin to check a URL after start and make sure it comes back ok
 
-    *   Write a plugin to dynamically generate conf files
+    *   Plugin to dynamically generate conf files
+
+    *   Consult global serverctlrc file as well, for common host settings
+
+    *   Add persistent shell mode, to eliminate startup cost for repeated
+        restarts
 
 ACKNOWLEDGMENTS
     This module was developed for the Digital Media group of the Hearst

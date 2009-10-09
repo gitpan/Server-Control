@@ -2,6 +2,15 @@ Revision history for Server-Control
 
 ** denotes an incompatible change
 
+0.11  Oct 8, 2009
+
+- Add hup action
+- Allow restart method to be set to hup or stopstart (default is still stopstart)
+- Parse relative error_log and pid_file paths in Apache conf correctly
+- Handle --serverctlrc correctly
+- Make restart work if server isn't running
+- Improve diagnostics when server is only partially active
+
 0.10  Sep 25, 2009
 
 - Fix -b option in apachectlp

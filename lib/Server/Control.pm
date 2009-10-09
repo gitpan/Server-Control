@@ -11,15 +11,14 @@ use Moose;
 use MooseX::StrictConstructor;
 use Moose::Util::TypeConstraints;
 use Pod::Usage;
-use Proc::ProcessTable;
 use Time::HiRes qw(usleep);
 use Server::Control::Util
-  qw(is_port_active kill_children something_is_listening_msg);
+  qw(is_port_active kill_children something_is_listening_msg process_table);
 use YAML::Any;
 use strict;
 use warnings;
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 
 # Gives us new_with_traits - only if MooseX::Traits is installed
 #
@@ -27,9 +26,12 @@ eval {
     with 'MooseX::Traits';
     has '+_trait_namespace' => ( default => 'Server::Control::Plugin' );
 };
-if ($@) {
+if ( my $moosex_traits_error = $@ ) {
     __PACKAGE__->meta->add_method(
-        new_with_traits => sub { die "MooseX::Traits could not be loaded" } );
+        new_with_traits => sub {
+            die "MooseX::Traits could not be loaded - $moosex_traits_error";
+        }
+    );
 }
 
 #
@@ -42,15 +44,18 @@ if ($@) {
 has 'bind_addr' => ( is => 'ro', isa => 'Str', lazy_build => 1 );
 has 'description' =>
   ( is => 'ro', isa => 'Str', lazy_build => 1, init_arg => undef );
-has 'error_log'            => ( is => 'ro', isa => 'Str',  lazy_build => 1 );
-has 'log_dir'              => ( is => 'ro', isa => 'Str',  lazy_build => 1 );
-has 'name'                 => ( is => 'ro', isa => 'Str',  lazy_build => 1 );
-has 'pid_file'             => ( is => 'ro', isa => 'Str',  lazy_build => 1 );
-has 'poll_for_status_secs' => ( is => 'ro', isa => 'Num',  default    => 0.2 );
-has 'port'                 => ( is => 'ro', isa => 'Int',  lazy_build => 1 );
+has 'error_log'            => ( is => 'ro', isa => 'Str', lazy_build => 1 );
+has 'log_dir'              => ( is => 'ro', isa => 'Str', lazy_build => 1 );
+has 'name'                 => ( is => 'ro', isa => 'Str', lazy_build => 1 );
+has 'pid_file'             => ( is => 'ro', isa => 'Str', lazy_build => 1 );
+has 'poll_for_status_secs' => ( is => 'ro', isa => 'Num', default    => 0.2 );
+has 'port'                 => ( is => 'ro', isa => 'Int', lazy_build => 1 );
+has 'restart_method' =>
+  ( is => 'ro', isa => enum( [qw(hup stopstart)] ), default => 'stopstart' );
 has 'server_root'          => ( is => 'ro', isa => 'Str' );
 has 'use_sudo'             => ( is => 'ro', isa => 'Bool', lazy_build => 1 );
-has 'wait_for_status_secs' => ( is => 'ro', isa => 'Int',  default    => 10 );
+has 'wait_for_hup_secs'    => ( is => 'ro', isa => 'Num', default => 0.5 );
+has 'wait_for_status_secs' => ( is => 'ro', isa => 'Int', default => 10 );
 
 # These are only for command-line. Would like to prevent their use from regular new()...
 #
@@ -72,36 +77,63 @@ use constant {
 };
 
 #
-# ATTRIBUTE BUILDERS
+# CONSTRUCTION
 #
+
+sub BUILDARGS {
+    my $class  = shift;
+    my %params = @_;
+
+    $class->_handle_serverctlrc( \%params );
+    $class->_log_constructor_params( \%params );
+
+    return $class->SUPER::BUILDARGS(%params);
+}
 
 # See if there is an rc_file, in serverctlrc parameter or in
 # server_root/serverctl.yml; if so, read from it and merge with parameters
 # passed to constructor.
 #
-sub BUILDARGS {
-    my $class  = shift;
-    my %params = @_;
+sub _handle_serverctlrc {
+    my ( $class, $params ) = @_;
 
-    my $rc_file = delete( $params{serverctlrc} )
-      || ( defined( $params{server_root} )
-        && "$params{server_root}/serverctl.yml" );
-    if ( defined $rc_file && -f $rc_file ) {
+    my $rc_file;
+    if ( $rc_file = delete( $params->{serverctlrc} ) ) {
+        die sprintf( "no such rc file '%s'", $rc_file ) if !-f $rc_file;
+    }
+    else {
+        if ( defined( $params->{server_root} ) ) {
+            my $default_rc_file =
+              join( "/", $params->{server_root}, "serverctl.yml" );
+            $rc_file = $default_rc_file if -f $default_rc_file;
+        }
+    }
+    if ( defined $rc_file ) {
         if ( defined( my $rc_params = YAML::Any::LoadFile($rc_file) ) ) {
             die "expected hashref from rc_file '$rc_file', got '$rc_params'"
               unless ref($rc_params) eq 'HASH';
             %$rc_params =
               map { my $val = $rc_params->{$_}; s/\-/_/g; ( $_, $val ) }
               keys(%$rc_params);
-            %params = ( %$rc_params, %params );
+            %$params = ( %$rc_params, %$params );
             $log->debugf( "found rc file '%s' with these parameters: %s",
                 $rc_file, $rc_params )
               if $log->is_debug;
         }
     }
-
-    return $class->SUPER::BUILDARGS(%params);
 }
+
+sub _log_constructor_params {
+    my ( $class, $params ) = @_;
+
+    $log->debugf( "constructing Server::Control with these params: %s",
+        $params )
+      if $log->is_debug;
+}
+
+#
+# ATTRIBUTE BUILDERS
+#
 
 sub _build_bind_addr {
     return "localhost";
@@ -158,20 +190,8 @@ sub _build_use_sudo {
 sub start {
     my $self = shift;
 
-    if ( my $proc = $self->is_running() ) {
-        ( my $status = $self->status_as_string() ) =~
-          s/running/already running/;
-        $log->warnf($status);
-    }
-    elsif ( $self->is_listening() ) {
-        $log->warnf(
-            "cannot start %s - pid file '%s' does not exist, but %s",
-            $self->description(),
-            $self->pid_file(),
-            something_is_listening_msg( $self->port, $self->bind_addr )
-        );
-    }
-    else {
+    if ( !$self->_running_before_start() && !$self->_listening_before_start() )
+    {
         my $error_size_start = $self->_start_error_log_watch();
 
         eval { $self->do_start() };
@@ -194,6 +214,33 @@ sub start {
         }
     }
     $self->failed_start();
+    return 0;
+}
+
+sub _running_before_start {
+    my $self = shift;
+
+    if ( my $proc = $self->is_running() ) {
+        ( my $status = $self->status_as_string() ) =~
+          s/running/already running/;
+        $log->warnf($status);
+        return 1;
+    }
+    return 0;
+}
+
+sub _listening_before_start {
+    my $self = shift;
+
+    if ( $self->is_listening() ) {
+        $log->warnf(
+            "cannot start %s - pid file '%s' does not exist, but %s",
+            $self->description(),
+            $self->pid_file(),
+            something_is_listening_msg( $self->port, $self->bind_addr )
+        );
+        return 1;
+    }
     return 0;
 }
 
@@ -220,14 +267,47 @@ sub stop {
 sub restart {
     my ($self) = @_;
 
-    if ( $self->stop() ) {
+    if ( !$self->is_running() ) {
         return $self->start();
     }
     else {
-        $log->infof( "could not stop %s, will not attempt start",
-            $self->description() );
+        my $restart_method = $self->restart_method;
+        $self->$restart_method();
+    }
+}
+
+sub hup {
+    my ($self) = @_;
+
+    my $proc = $self->_ensure_is_running() or return 0;
+    my $error_size_start = $self->_start_error_log_watch();
+    unless ( kill( 1, $proc->pid ) ) {
+        $log->errorf( "could not signal process %d", $proc->pid );
         return 0;
     }
+    $log->infof( "sent HUP to process %d", $proc->pid );
+    usleep( $self->wait_for_hup_secs() * 1_000_000 );
+    if ( $self->_wait_for_status( ACTIVE, 'restart' ) ) {
+        $log->info( $self->status_as_string() );
+        return 1;
+    }
+    else {
+        $self->_report_error_log_output($error_size_start);
+        return 0;
+    }
+}
+
+sub stopstart {
+    my ($self) = @_;
+
+    if ( $self->is_running() ) {
+        unless ( $self->stop() ) {
+            $log->infof( "could not stop %s, will not attempt start",
+                $self->description() );
+            return 0;
+        }
+    }
+    return $self->start();
 }
 
 sub refork {
@@ -259,29 +339,34 @@ sub do_stop {
 }
 
 sub status {
-    my ($self) = @_;
+    my $self = shift;
 
-    return ( $self->is_running() ? RUNNING   : 0 ) |
-      ( $self->is_listening()    ? LISTENING : 0 );
+    # Can pass in is_running() result, else we'll do it here
+    my $is_running = (@_) ? shift(@_) : $self->is_running();
+    return ( $is_running    ? RUNNING   : 0 ) |
+      ( $self->is_listening ? LISTENING : 0 );
 }
 
 sub status_as_string {
     my ($self) = @_;
 
     my $port   = $self->port;
-    my $status = $self->status();
+    my $proc   = $self->is_running();
+    my $status = $self->status($proc);
     my $msg =
-        ( $status == INACTIVE ) ? "not running"
+        ( $status == INACTIVE ) ? "is not running"
       : ( $status == RUNNING )
-      ? sprintf( "running (pid %d), but not listening to port %d",
-        $self->is_running->pid, $port )
+      ? sprintf( "appears to be running (pid %d), but not listening to port %d",
+        $proc->pid, $port )
       : ( $status == LISTENING )
-      ? sprintf( "not running, but something is listening to port %d", $port )
+      ? sprintf( "pid file '%s' does not exist, but %s",
+        $self->pid_file,
+        something_is_listening_msg( $self->port, $self->bind_addr ) )
       : ( $status == ACTIVE )
-      ? sprintf( "running (pid %d) and listening to port %d",
-        $self->is_running->pid, $port )
+      ? sprintf( "is running (pid %d) and listening to port %d",
+        $proc->pid, $port )
       : die "invalid status: $status";
-    return join( " is ", $self->description(), $msg );
+    return join( " ", $self->description(), $msg );
 }
 
 sub is_running {
@@ -291,7 +376,7 @@ sub is_running {
     my $pid_contents = eval { read_file($pid_file) };
     if ($@) {
         $log->debugf( "pid file '%s' does not exist", $pid_file )
-          if $log->is_debug;
+          if $log->is_debug && !$self->{_suppress_logs};
         return undef;
     }
     else {
@@ -303,10 +388,11 @@ sub is_running {
             return undef;
         }
 
-        my $ptable = new Proc::ProcessTable();
+        my $ptable = process_table();
         if ( my ($proc) = grep { $_->pid == $pid } @{ $ptable->table } ) {
             $log->debugf( "pid file '%s' exists and has valid pid %d",
-                $pid_file, $pid );
+                $pid_file, $pid )
+              if $log->is_debug && !$self->{_suppress_logs};
             return $proc;
         }
         else {
@@ -330,7 +416,7 @@ sub is_listening {
             "%s is listening to %s:%d",
             $is_listening ? "something" : "nothing",
             $self->bind_addr(), $self->port()
-        );
+        ) if $log->is_debug && !$self->{_suppress_logs};
     }
     return $is_listening;
 }
@@ -346,11 +432,14 @@ sub run_system_command {
 }
 
 sub valid_cli_actions {
-    return qw(start stop restart ping);
+    return qw(start stop restart ping hup stopstart refork);
 }
+
+my @save_argv;
 
 sub handle_cli {
     my $class = shift;
+    @save_argv = @ARGV if !@save_argv;
 
     # Allow caller to specify subclass with -c|--class and include paths with -I
     #
@@ -368,9 +457,11 @@ sub handle_cli {
         return $full_subclass->handle_cli();
     }
 
-    # Create object based on @ARGV options
+    # Create object based on @ARGV options. Restore @ARGV afterwards, as
+    # some subclasses need it, e.g. Net::Server needs @ARGV intact for HUP.
     #
     my $self = $class->new_with_options(@_);
+    @ARGV = @save_argv;
 
     # Validate and perform specified action
     #
@@ -416,6 +507,7 @@ sub _wait_for_status {
     $log->infof("waiting for server $action");
     my $wait_until = time() + $self->wait_for_status_secs();
     my $poll_delay = $self->poll_for_status_secs() * 1_000_000;
+    local $self->{_suppress_logs} = 1;    # Suppress logs during this loop
     while ( time() < $wait_until ) {
         if ( $self->status == $status ) {
             return 1;
@@ -498,6 +590,7 @@ sub _cli_option_pairs {
         'pid-file=s'             => 'pid_file',
         'port=s'                 => 'port',
         'q|quiet'                => 'quiet',
+        'serverctlrc=s'          => 'serverctlrc',
         'use-sudo=s'             => 'use_sudo',
         'v|verbose'              => 'verbose',
         'wait-for-status-secs=s' => 'wait_for_status_secs',
@@ -528,9 +621,10 @@ sub _perform_cli_action {
     elsif ( !grep { $_ eq $action } $self->valid_cli_actions ) {
         $self->_cli_usage(
             sprintf(
-                "invalid action '%s' - must be one of %s",
+                "invalid action '%s' - valid actions are %s",
                 $action,
-                join( ", ", ( map { "'$_'" } $self->valid_cli_actions ) )
+                join( ", ",
+                    ( map { "'$_'" } sort( $self->valid_cli_actions ) ) )
             )
         );
     }
@@ -704,6 +798,11 @@ At least one port that server will listen to, so that C<Server::Control> can
 check it on start/stop. Will throw an error if this cannot be determined. See
 also L</bind_addr>.
 
+=item restart_method
+
+Method to use for the L</restart> action - one of L</hup> or L</stopstart>,
+defaults to L</stopstart>.
+
 =item server_root
 
 Root directory of server, for conf files, log files, etc. This will affect
@@ -754,8 +853,23 @@ stopping it).
 
 =item restart
 
-Restart the server (by stopping it, then starting it). Returns 1 if the server
-both stopped and started succesfully, 0 if not.
+If the server is not running, start it. Otherwise, restart the server using the
+L</restart_method> - one of L</hup> or L</stopstart>, defaults to
+L</stopstart>.
+
+=item hup
+
+Sends the server parent process a HUP signal, which is a standard way of
+restarting it. Returns 1 if the server was successfully signalled and is still
+running afterwards, 0 if not.
+
+Note: HUP is not yet fully supported for NetServer and HTTPServerSimple,
+because it depends on a valid command-line that can be re-exec'd.
+
+=item stopstart
+
+Stops the server (if it is running), then starting it. Returns 1 if the server
+restarted succesfully, 0 if not.
 
 =item refork
 
@@ -1019,11 +1133,19 @@ L<MooseX::Control|MooseX::Control>
 
 =item *
 
-Add 'refork' action, which kills all children of a forking server
+Plugin to check a URL after start and make sure it comes back ok
 
 =item *
 
-Write a plugin to dynamically generate conf files
+Plugin to dynamically generate conf files
+
+=item *
+
+Consult global serverctlrc file as well, for common host settings
+
+=item *
+
+Add persistent shell mode, to eliminate startup cost for repeated restarts
 
 =back
 
