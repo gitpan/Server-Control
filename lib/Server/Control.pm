@@ -18,7 +18,7 @@ use YAML::Any;
 use strict;
 use warnings;
 
-our $VERSION = '0.11';
+our $VERSION = '0.12';
 
 # Gives us new_with_traits - only if MooseX::Traits is installed
 #
@@ -198,20 +198,19 @@ sub start {
         if ( my $err = $@ ) {
             $log->errorf( "error while trying to start %s: %s",
                 $self->description(), $err );
-            $self->_report_error_log_output($error_size_start);
         }
         else {
             if ( $self->_wait_for_status( ACTIVE, 'start' ) ) {
                 ( my $status = $self->status_as_string() ) =~
                   s/running/now running/;
                 $log->info($status);
-                $self->successful_start();
-                return 1;
-            }
-            else {
-                $self->_report_error_log_output($error_size_start);
+                if ( $self->validate_server() ) {
+                    $self->successful_start();
+                    return 1;
+                }
             }
         }
+        $self->_report_error_log_output($error_size_start);
     }
     $self->failed_start();
     return 0;
@@ -289,12 +288,13 @@ sub hup {
     usleep( $self->wait_for_hup_secs() * 1_000_000 );
     if ( $self->_wait_for_status( ACTIVE, 'restart' ) ) {
         $log->info( $self->status_as_string() );
-        return 1;
+        if ( $self->validate_server() ) {
+            $self->successful_start();
+            return 1;
+        }
     }
-    else {
-        $self->_report_error_log_output($error_size_start);
-        return 0;
-    }
+    $self->_report_error_log_output($error_size_start);
+    return 0;
 }
 
 sub stopstart {
@@ -421,6 +421,14 @@ sub is_listening {
     return $is_listening;
 }
 
+sub validate_server {
+    my ($self) = @_;
+
+    # Validate running server, in a server-specific way. By default just assume valid.
+    #
+    return 1;
+}
+
 sub run_system_command {
     my ( $self, $cmd ) = @_;
 
@@ -488,7 +496,17 @@ sub new_with_options {
     # Combine passed and command-line params, pass to constructor
     #
     my %params = ( %passed_params, %cli_params );
-    return $class->new(%params);
+    return $class->new_from_cli(%params);
+}
+
+# This method gives subclasses an opportunity to examine the full set
+# of parameters (both specified on the cli passed to handle_cli) and issue
+# a cli-specific error, before moving onto the regular constructor.
+#
+sub new_from_cli {
+    my $class = shift;
+
+    return $class->new(@_);
 }
 
 #
@@ -608,7 +626,8 @@ sub _setup_cli_logging {
       Log::Dispatch->new( outputs =>
           [ [ 'Screen', stderr => 0, min_level => $log_level, newline => 1 ] ]
       );
-    Log::Any->set_adapter( 'Dispatch', dispatcher => $dispatcher );
+    Log::Any->set_adapter( { category => qr/^Server::Control/ },
+        'Dispatch', dispatcher => $dispatcher );
 }
 
 sub _perform_cli_action {
@@ -753,7 +772,7 @@ implementation stabilizes.
 =head1 CONSTRUCTOR PARAMETERS
 
 You can pass the following common parameters to the constructor, or include
-them in an L<serverctlrc|rc file>.
+them in an L<rc file|serverctlrc>.
 
 Some subclasses can deduce some of these parameters without needing an explicit
 value passed in.  For example,
@@ -1014,7 +1033,7 @@ L<Server::Control::Apache|Server::Control::Apache> for an example.
 
 =over
 
-=item do_start
+=item do_start ()
 
 This actually starts the server - it is called by L</start> and must be defined
 by the subclass. Any parameters to L</start> are passed here. If your server is
@@ -1031,6 +1050,16 @@ the current process, as returned by L</is_running>.
 
 Runs the specified I<$cmd> on the command line. Adds sudo if necessary (see
 L</use_sudo>), logs the command, and throws runtime errors appropriately.
+
+=item validate_server ()
+
+This method is called after the server starts or is HUP'd. It gives the
+subclass a chance to validate the server in a particular way. For example,
+L<Server::Control::Apache|Server::Control::Apache> can visit a particular URL
+and make sure the result is as expected.
+
+C<validate_server> should return a boolean indicating whether the server is in
+a valid state. The default C<validate_server> always returns true.
 
 =back
 

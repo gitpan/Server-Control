@@ -6,7 +6,6 @@ use File::Which qw(which);
 use Log::Any qw($log);
 use Moose;
 use MooseX::StrictConstructor;
-use Pod::Usage qw(pod2usage);
 use strict;
 use warnings;
 
@@ -18,6 +17,8 @@ has 'parsed_config' => ( is => 'ro', lazy_build => 1, init_arg => undef );
 has 'no_parse_config' => ( is => 'ro' );
 has 'server_root'     => ( is => 'ro', lazy_build => 1 );
 has 'stop_cmd'        => ( is => 'rw', init_arg => undef, default => 'stop' );
+has 'validate_url'    => ( is => 'ro' );
+has 'validate_regex' => ( is => 'ro', isa => 'RegexpRef' );
 
 sub _cli_option_pairs {
     my $class = shift;
@@ -29,17 +30,17 @@ sub _cli_option_pairs {
     );
 }
 
-around '_cli_parse_argv' => sub {
-    my $orig  = shift;
-    my $class = shift;
+around 'new_from_cli' => sub {
+    my $orig   = shift;
+    my $class  = shift;
+    my %params = @_;
 
-    my %cli_params = $class->$orig(@_);
-    if (   !defined( $cli_params{server_root} )
-        && !defined( $cli_params{conf_file} ) )
+    if (   !defined( $params{server_root} )
+        && !defined( $params{conf_file} ) )
     {
         $class->_cli_usage("must specify one of -d or -f");
     }
-    return %cli_params;
+    return $class->$orig(@_);
 };
 
 override 'valid_cli_actions' => sub {
@@ -201,8 +202,6 @@ sub graceful {
     if ( my $err = $@ ) {
         $log->errorf( "error during graceful restart of %s: %s",
             $self->description(), $err );
-        $self->_report_error_log_output($error_size_start);
-        return;
     }
 
     if (
@@ -212,10 +211,13 @@ sub graceful {
       )
     {
         $log->info( $self->status_as_string() );
+        if ( $self->validate_server() ) {
+            $self->successful_start();
+            return 1;
+        }
     }
-    else {
-        $self->_report_error_log_output($error_size_start);
-    }
+    $self->_report_error_log_output($error_size_start);
+    return 0;
 }
 
 sub run_httpd_command {
@@ -226,6 +228,40 @@ sub run_httpd_command {
 
     my $cmd = "$httpd_binary -k $command -f $conf_file";
     $self->run_system_command($cmd);
+}
+
+sub validate_server {
+    my ($self) = @_;
+
+    if ( defined( my $url = $self->validate_url ) ) {
+        require LWP;
+        $url = sprintf( "http://%s%s%s",
+            $self->bind_addr,
+            ( $self->port == 80 ? '' : ( ":" . $self->port ) ), $url )
+          if substr( $url, 0, 1 ) eq '/';
+        $log->infof( "validating url '%s'", $url );
+        my $ua  = LWP::UserAgent->new;
+        my $res = $ua->get($url);
+        if ( $res->is_success ) {
+            if ( my $regex = $self->validate_regex ) {
+                if ( $res->content !~ $regex ) {
+                    $log->errorf(
+                        "content of '%s' (%d bytes) did not match regex '%s'",
+                        $url, length( $res->content ), $regex );
+                    return 0;
+                }
+            }
+            $log->debugf("validation successful") if $log->is_debug;
+            return 1;
+        }
+        else {
+            $log->errorf( "error getting '%s': %s", $url, $res->status_line );
+            return 0;
+        }
+    }
+    else {
+        return 1;
+    }
 }
 
 sub _rel2abs {
@@ -271,8 +307,8 @@ want to use instead.
 
 =head1 CONSTRUCTOR
 
-The constructor options are as described in L<Server::Control|Server::Control>,
-except for:
+In addition to the constructor options described in
+L<Server::Control|Server::Control>:
 
 =over
 
@@ -291,6 +327,17 @@ uses the first one found.
 
 Don't attempt to parse the httpd.conf; only look at values passed in the usual
 ways.
+
+=item validate_url
+
+A URL to visit after the server has been started or HUP'd, in order to validate
+the state of the server. The URL just needs to return an OK result to be
+considered valid, unless L</validate_regex> is also specified.
+
+=item validate_regex
+
+A regex to match against the content returned by L</validate_url>. The content
+must match the regex for the server to be considered valid.
 
 =back
 

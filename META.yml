@@ -45,8 +45,7 @@ requires:
   IO::Socket: 0
   IPC::System::Simple: 1.18
   List::MoreUtils: 0.13
-  Log::Any::Adapter::Dispatch: 0.03
-  Log::Dispatch: 2.25
+  Log::Any::Adapter::Dispatch: 0.05
   Moose: 0.66
   MooseX::StrictConstructor: 0.08
   Pod::Usage: 0
@@ -56,4 +55,4 @@ requires:
   perl: 5.6.0
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.11
+version: 0.12
