@@ -1,4 +1,5 @@
 package Server::Control;
+use Capture::Tiny;
 use File::Basename;
 use File::Slurp qw(read_file);
 use File::Spec::Functions qw(catdir);
@@ -18,7 +19,7 @@ use YAML::Any;
 use strict;
 use warnings;
 
-our $VERSION = '0.12';
+our $VERSION = '0.13';
 
 # Gives us new_with_traits - only if MooseX::Traits is installed
 #
@@ -200,7 +201,8 @@ sub start {
                 $self->description(), $err );
         }
         else {
-            if ( $self->_wait_for_status( ACTIVE, 'start' ) ) {
+            if ( $self->_wait_for_status( ACTIVE, 'start', $error_size_start ) )
+            {
                 ( my $status = $self->status_as_string() ) =~
                   s/running/now running/;
                 $log->info($status);
@@ -210,7 +212,6 @@ sub start {
                 }
             }
         }
-        $self->_report_error_log_output($error_size_start);
     }
     $self->failed_start();
     return 0;
@@ -246,6 +247,8 @@ sub _listening_before_start {
 sub stop {
     my ($self) = @_;
 
+    my $error_size_start = $self->_start_error_log_watch();
+
     my $proc = $self->_ensure_is_running() or return 0;
     $self->_warn_if_different_user($proc);
 
@@ -254,7 +257,7 @@ sub stop {
         $log->errorf( "error while trying to stop %s: %s",
             $self->description(), $err );
     }
-    elsif ( $self->_wait_for_status( INACTIVE, 'stop' ) ) {
+    elsif ( $self->_wait_for_status( INACTIVE, 'stop', $error_size_start ) ) {
         $log->infof( "%s has stopped", $self->description() );
         $self->successful_stop();
         return 1;
@@ -286,14 +289,13 @@ sub hup {
     }
     $log->infof( "sent HUP to process %d", $proc->pid );
     usleep( $self->wait_for_hup_secs() * 1_000_000 );
-    if ( $self->_wait_for_status( ACTIVE, 'restart' ) ) {
+    if ( $self->_wait_for_status( ACTIVE, 'restart', $error_size_start ) ) {
         $log->info( $self->status_as_string() );
         if ( $self->validate_server() ) {
             $self->successful_start();
             return 1;
         }
     }
-    $self->_report_error_log_output($error_size_start);
     return 0;
 }
 
@@ -520,13 +522,18 @@ sub _start_error_log_watch {
 }
 
 sub _wait_for_status {
-    my ( $self, $status, $action ) = @_;
+    my ( $self, $status, $action, $error_size_start ) = @_;
 
     $log->infof("waiting for server $action");
     my $wait_until = time() + $self->wait_for_status_secs();
     my $poll_delay = $self->poll_for_status_secs() * 1_000_000;
     local $self->{_suppress_logs} = 1;    # Suppress logs during this loop
     while ( time() < $wait_until ) {
+        if ( defined($error_size_start) ) {
+            if ( $self->_report_error_log_output($error_size_start) ) {
+                $error_size_start = $self->_start_error_log_watch();
+            }
+        }
         if ( $self->status == $status ) {
             return 1;
         }
@@ -554,13 +561,15 @@ sub _report_error_log_output {
                 open( $fh, $error_log );
                 seek( $fh, $error_size_start, 0 );
                 read( $fh, $buf, $error_size_end - $error_size_start );
-                $buf =~ s/^(.*)/> $1/mg;
-                if ( $buf =~ /\S/ ) {
-                    $log->infof( "error log output:\n%s", $buf );
+                my @lines = grep { /\S/ } split( "\n", $buf );
+                foreach my $line (@lines) {
+                    $log->infof( "error log: %s", $line );
                 }
+                return 1;
             }
         }
     }
+    return 0;
 }
 
 sub _handle_corrupt_pid_file {
@@ -658,7 +667,16 @@ sub _cli_usage {
 
     $msg     ||= "";
     $verbose ||= 0;
-    pod2usage( -msg => $msg, -verbose => $verbose, -exitval => 2 );
+    my $usage = Capture::Tiny::capture_merged {
+        pod2usage( -msg => $msg, -verbose => $verbose, -exitval => "NOEXIT" );
+    };
+    if ( $usage !~ /\S/ ) {
+        die "could not get usage from pod2usage for $0";
+    }
+    else {
+        print STDERR $usage;
+        exit(2);
+    }
 }
 
 sub _ensure_is_running {
@@ -676,7 +694,7 @@ sub _warn_if_different_user {
 
     my ( $uid, $eid ) = ( $<, $> );
     if ( ( $eid || $uid ) && $proc->uid != $uid && !$self->use_sudo() ) {
-        $log->warn(
+        $log->warnf(
             "warning: process %d is owned by uid %d ('%s'), different than current user %d ('%s'); may not be able to stop server",
             $proc->pid,
             $proc->uid,

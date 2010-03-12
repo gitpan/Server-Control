@@ -7,7 +7,6 @@ author 'Jonathan Swartz <swartz@pobox.com>';
 
 perl_version '5.006';
 
-build_requires 'Capture::Tiny'        => 0;
 build_requires 'File::Path'           => 0;
 build_requires 'Guard'                => 0.5;
 build_requires 'HTTP::Server::Simple' => 0.28;
@@ -18,6 +17,7 @@ build_requires 'Test::Log::Dispatch'  => 0;
 build_requires 'Test::Most'           => 0;
 
 requires 'Apache::ConfigParser'        => '1.01';
+requires 'Capture::Tiny'               => 0;
 requires 'File::Slurp'                 => '9999.13';
 requires 'File::Spec::Functions'       => 0;
 requires 'File::Temp'                  => 0;
@@ -31,7 +31,7 @@ requires 'Log::Any::Adapter::Dispatch' => '0.05';
 requires 'Moose'                       => '0.66';
 requires 'MooseX::StrictConstructor'   => '0.08';
 requires 'Pod::Usage'                  => 0;
-requires 'Proc::ProcessTable'          => '0.42';
+requires 'Proc::ProcessTable'          => '0.39';
 requires 'Time::HiRes'                 => 0;
 requires 'YAML::Any'                   => 0;
 
