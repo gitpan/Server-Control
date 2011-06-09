@@ -1,4 +1,7 @@
 package Server::Control;
+BEGIN {
+  $Server::Control::VERSION = '0.15';
+}
 use Capture::Tiny;
 use File::Basename;
 use File::Slurp qw(read_file);
@@ -18,8 +21,6 @@ use Server::Control::Util
 use YAML::Any;
 use strict;
 use warnings;
-
-our $VERSION = '0.14';
 
 # Gives us new_with_traits - only if MooseX::Traits is installed
 #
@@ -42,17 +43,19 @@ if ( my $moosex_traits_error = $@ ) {
 # Note: In some cases we use lazy_build rather than specifying required or a
 # default, to make life easier for subclasses.
 #
-has 'bind_addr' => ( is => 'ro', isa => 'Str', lazy_build => 1 );
+has 'bind_addr'   => ( is => 'ro', isa => 'Str', lazy_build => 1 );
 has 'description' =>
-  ( is => 'ro', isa => 'Str', lazy_build => 1, init_arg => undef );
+( is => 'ro', isa => 'Str', lazy_build => 1, init_arg => undef );
+
 has 'error_log'            => ( is => 'ro', isa => 'Str', lazy_build => 1 );
 has 'log_dir'              => ( is => 'ro', isa => 'Str', lazy_build => 1 );
 has 'name'                 => ( is => 'ro', isa => 'Str', lazy_build => 1 );
 has 'pid_file'             => ( is => 'ro', isa => 'Str', lazy_build => 1 );
-has 'poll_for_status_secs' => ( is => 'ro', isa => 'Num', default    => 0.2 );
+has 'poll_for_status_secs' => ( is => 'ro', isa => 'Num', default => 0.2 );
 has 'port'                 => ( is => 'ro', isa => 'Int', lazy_build => 1 );
 has 'restart_method' =>
-  ( is => 'ro', isa => enum( [qw(hup stopstart)] ), default => 'stopstart' );
+( is => 'ro', isa => enum( [qw(hup stopstart)] ), default => 'stopstart' );
+
 has 'server_root'          => ( is => 'ro', isa => 'Str' );
 has 'use_sudo'             => ( is => 'ro', isa => 'Bool', lazy_build => 1 );
 has 'wait_for_hup_secs'    => ( is => 'ro', isa => 'Num', default => 0.5 );
@@ -199,6 +202,7 @@ sub start {
         if ( my $err = $@ ) {
             $log->errorf( "error while trying to start %s: %s",
                 $self->description(), $err );
+            $self->_report_error_log_output($error_size_start);
         }
         else {
             if (
@@ -260,6 +264,7 @@ sub stop {
     if ( my $err = $@ ) {
         $log->errorf( "error while trying to stop %s: %s",
             $self->description(), $err );
+        $self->_report_error_log_output($error_size_start);
     }
     elsif ( $self->_wait_for_status( INACTIVE, 'stop', $error_size_start ) ) {
         $log->infof( "%s has stopped", $self->description() );
@@ -719,13 +724,17 @@ sub _warn_if_different_user {
 
 1;
 
-__END__
+
 
 =pod
 
 =head1 NAME
 
 Server::Control -- Flexible apachectl style control for servers
+
+=head1 VERSION
+
+version 0.15
 
 =head1 SYNOPSIS
 
@@ -1214,22 +1223,19 @@ This module was developed for the Digital Media group of the Hearst
 Corporation, a diversified media company based in New York City.  Many thanks
 to Hearst management for agreeing to this open source release.
 
-=head1 AUTHOR
-
-Jonathan Swartz
-
 =head1 SEE ALSO
 
 L<serverctlp|serverctlp>, L<Server::Control::Apache|Server::Control::Apache>
 
-=head1 COPYRIGHT & LICENSE
+=head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2007 Jonathan Swartz, all rights reserved.
+This software is copyright (c) 2011 by Jonathan Swartz.
 
-Server::Control is provided "as is" and without any express or implied
-warranties, including, without limitation, the implied warranties of
-merchantibility and fitness for a particular purpose.
+This is free software; you can redistribute it and/or modify it under
+the same terms as the Perl 5 programming language system itself.
 
-This program is free software; you can redistribute it and/or modify it under
-the same terms as Perl itself.
+=cut
+
+
+__END__
 

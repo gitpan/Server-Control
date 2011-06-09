@@ -1,4 +1,7 @@
 package Server::Control::NetServer;
+BEGIN {
+  $Server::Control::NetServer::VERSION = '0.15';
+}
 use Carp;
 use Moose;
 use MooseX::StrictConstructor;
@@ -7,13 +10,8 @@ use warnings;
 
 extends 'Server::Control';
 
-has 'net_server_class' => (
-    is       => 'ro',
-    isa      => 'Str',
-    required => 1
-);
-has 'net_server_params' =>
-  ( is => 'ro', isa => 'HashRef', default => sub { {} } );
+has 'net_server_class'  => ( is => 'ro', isa => 'Str', required => 1 );
+has 'net_server_params' => ( is => 'ro', isa => 'HashRef', default => sub { {} } );
 
 # All of this hackery is to skip the port check on start during a HUP,
 # because Net::Server leaves the sockets open.
@@ -77,13 +75,17 @@ sub do_start {
 
 1;
 
-__END__
+
 
 =pod
 
 =head1 NAME
 
 Server::Control::NetServer -- apachectl style control for Net::Server servers
+
+=head1 VERSION
+
+version 0.15
 
 =head1 SYNOPSIS
 
@@ -144,23 +146,19 @@ L</net_server_params>.
 
 =back
 
-=head1 AUTHOR
-
-Jonathan Swartz
-
 =head1 SEE ALSO
 
 L<Server::Control|Server::Control>, L<Net::Server|Net::Server>
 
-=head1 COPYRIGHT & LICENSE
+=head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2007 Jonathan Swartz.
+This software is copyright (c) 2011 by Jonathan Swartz.
 
-Server::Control::Apache is provided "as is" and without any express or implied
-warranties, including, without limitation, the implied warranties of
-merchantibility and fitness for a particular purpose.
-
-This program is free software; you can redistribute it and/or modify it under
-the same terms as Perl itself.
+This is free software; you can redistribute it and/or modify it under
+the same terms as the Perl 5 programming language system itself.
 
 =cut
+
+
+__END__
+

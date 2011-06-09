@@ -1,4 +1,12 @@
 #!perl
+
+BEGIN {
+  unless ($ENV{RELEASE_TESTING}) {
+    require Test::More;
+    Test::More::plan(skip_all => 'these tests are for release candidate testing');
+  }
+}
+
 use Test::More;
 use Capture::Tiny qw(tee tee_merged capture_merged);
 use File::Temp qw(tempdir);

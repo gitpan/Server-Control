@@ -1,6 +1,9 @@
 NAME
     Server::Control -- Flexible apachectl style control for servers
 
+VERSION
+    version 0.15
+
 SYNOPSIS
         use Server::Control::Apache;
 
@@ -76,19 +79,12 @@ ACKNOWLEDGMENTS
     Corporation, a diversified media company based in New York City. Many
     thanks to Hearst management for agreeing to this open source release.
 
-AUTHOR
-    Jonathan Swartz
-
 SEE ALSO
     serverctlp, Server::Control::Apache
 
-COPYRIGHT & LICENSE
-    Copyright (C) 2007 Jonathan Swartz, all rights reserved.
+COPYRIGHT AND LICENSE
+    This software is copyright (c) 2011 by Jonathan Swartz.
 
-    Server::Control is provided "as is" and without any express or implied
-    warranties, including, without limitation, the implied warranties of
-    merchantibility and fitness for a particular purpose.
-
-    This program is free software; you can redistribute it and/or modify it
-    under the same terms as Perl itself.
+    This is free software; you can redistribute it and/or modify it under
+    the same terms as the Perl 5 programming language system itself.
 

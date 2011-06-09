@@ -1,53 +1,80 @@
-use inc::Module::Install;
 
-name 'Server-Control';
-abstract 'Flexible apachectl style control for servers';
-all_from 'lib/Server/Control.pm';
-author 'Jonathan Swartz <swartz@pobox.com>';
+use strict;
+use warnings;
 
-perl_version '5.006';
 
-build_requires 'File::Path'           => 0;
-build_requires 'Guard'                => 0.5;
-build_requires 'HTTP::Server::Simple' => 0.28;
-build_requires 'Net::Server'          => 0;
-build_requires 'POSIX'                => 0;
-build_requires 'Test::Class'          => 0;
-build_requires 'Test::Log::Dispatch'  => 0;
-build_requires 'Test::Most'           => 0;
 
-requires 'Apache::ConfigParser'        => '1.01';
-requires 'Capture::Tiny'               => 0;
-requires 'File::Slurp'                 => '9999.13';
-requires 'File::Spec::Functions'       => 0;
-requires 'File::Temp'                  => 0;
-requires 'File::Which'                 => 0;
-requires 'Getopt::Long'                => 0;
-requires 'Hash::MoreUtils'             => 0;
-requires 'IO::Socket'                  => 0;
-requires 'IPC::System::Simple'         => '1.18';
-requires 'List::MoreUtils'             => '0.13';
-requires 'Log::Any::Adapter::Dispatch' => '0.05';
-requires 'Moose'                       => '0.66';
-requires 'MooseX::StrictConstructor'   => '0.08';
-requires 'Pod::Usage'                  => 0;
-requires 'Proc::ProcessTable'          => '0.39';
-requires 'Time::HiRes'                 => 0;
-requires 'YAML::Any'                   => 0;
+use ExtUtils::MakeMaker 6.31;
 
-recommends 'Unix::Lsof'                => '0.0.9';
-recommends 'MooseX::Traits'            => '0.07';
 
-install_script 'bin/apachectlp';
 
-no_index directory => 'lib/Server/Control/t';
-no_index directory => 'lib/Server/Control/Test';
-no_index package => 'Server::Control::Util';
+my %WriteMakefileArgs = (
+  'ABSTRACT' => 'Process a directory of templates',
+  'AUTHOR' => 'Jonathan Swartz <swartz@pobox.com>',
+  'BUILD_REQUIRES' => {
+    'File::Path' => '0',
+    'Guard' => '0.5',
+    'HTTP::Server::Simple' => '0.28',
+    'Net::Server' => '0',
+    'POSIX' => '0',
+    'Test::Class' => '0',
+    'Test::Log::Dispatch' => '0',
+    'Test::Most' => '0'
+  },
+  'CONFIGURE_REQUIRES' => {
+    'ExtUtils::MakeMaker' => '6.31'
+  },
+  'DISTNAME' => 'Server-Control',
+  'EXE_FILES' => [
+    'bin/apachectlp',
+    'bin/serverctlp'
+  ],
+  'LICENSE' => 'perl',
+  'NAME' => 'Server::Control',
+  'PREREQ_PM' => {
+    'Apache::ConfigParser' => '1.01',
+    'Capture::Tiny' => '0',
+    'File::Slurp' => '9999.13',
+    'File::Spec::Functions' => '0',
+    'File::Temp' => '0',
+    'File::Which' => '0',
+    'Getopt::Long' => '0',
+    'Hash::MoreUtils' => '0',
+    'IO::Socket' => '0',
+    'IPC::System::Simple' => '1.18',
+    'List::MoreUtils' => '0.13',
+    'Log::Any::Adapter::Dispatch' => '0.05',
+    'Moose' => '0.66',
+    'MooseX::StrictConstructor' => '0.08',
+    'Pod::Usage' => '0',
+    'Proc::ProcessTable' => '0.39',
+    'Time::HiRes' => '0',
+    'YAML::Any' => '0'
+  },
+  'VERSION' => '0.15',
+  'test' => {
+    'TESTS' => 't/*.t'
+  }
+);
 
-extra_tests;
 
-license 'perl';
+unless ( eval { ExtUtils::MakeMaker->VERSION(6.56) } ) {
+  my $br = delete $WriteMakefileArgs{BUILD_REQUIRES};
+  my $pp = $WriteMakefileArgs{PREREQ_PM};
+  for my $mod ( keys %$br ) {
+    if ( exists $pp->{$mod} ) {
+      $pp->{$mod} = $br->{$mod} if $br->{$mod} > $pp->{$mod};
+    }
+    else {
+      $pp->{$mod} = $br->{$mod};
+    }
+  }
+}
 
-auto_install;
+delete $WriteMakefileArgs{CONFIGURE_REQUIRES}
+  unless eval { ExtUtils::MakeMaker->VERSION(6.52) };
 
-WriteAll;
+WriteMakefile(%WriteMakefileArgs);
+
+
+
