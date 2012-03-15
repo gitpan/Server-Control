@@ -2,7 +2,7 @@ NAME
     Server::Control -- Flexible apachectl style control for servers
 
 VERSION
-    version 0.15
+    version 0.16
 
 SYNOPSIS
         use Server::Control::Apache;

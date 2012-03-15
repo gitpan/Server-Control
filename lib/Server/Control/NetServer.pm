@@ -1,6 +1,6 @@
 package Server::Control::NetServer;
 BEGIN {
-  $Server::Control::NetServer::VERSION = '0.15';
+  $Server::Control::NetServer::VERSION = '0.16';
 }
 use Carp;
 use Moose;
@@ -17,6 +17,7 @@ has 'net_server_params' => ( is => 'ro', isa => 'HashRef', default => sub { {} }
 # because Net::Server leaves the sockets open.
 #
 has 'in_hup' => ( is => 'ro' );
+
 before '_perform_cli_action' => sub {
     push( @ARGV, '--in-hup' ) if !( grep { $_ eq '--in-hup' } @ARGV );
 };
@@ -85,7 +86,7 @@ Server::Control::NetServer -- apachectl style control for Net::Server servers
 
 =head1 VERSION
 
-version 0.15
+version 0.16
 
 =head1 SYNOPSIS
 

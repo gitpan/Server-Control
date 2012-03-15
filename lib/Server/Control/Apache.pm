@@ -1,6 +1,6 @@
 package Server::Control::Apache;
 BEGIN {
-  $Server::Control::Apache::VERSION = '0.15';
+  $Server::Control::Apache::VERSION = '0.16';
 }
 use Apache::ConfigParser;
 use Capture::Tiny;
@@ -10,6 +10,7 @@ use File::Which qw(which);
 use IPC::System::Simple qw(run);
 use Log::Any qw($log);
 use Moose;
+use Moose::Util::TypeConstraints;
 use MooseX::StrictConstructor;
 use strict;
 use warnings;
@@ -20,6 +21,7 @@ has 'conf_file'       => ( is => 'ro', lazy_build => 1, required => 1 );
 has 'httpd_binary'    => ( is => 'ro', lazy_build => 1 );
 has 'no_parse_config' => ( is => 'ro' );
 has 'parsed_config'   => ( is => 'ro', lazy_build => 1, init_arg => undef );
+has 'restart_method'  => ( is => 'ro', isa => enum( [qw(graceful hup stopstart)] ), default => 'stopstart' );
 has 'server_root'     => ( is => 'ro', lazy_build => 1 );
 has 'stop_cmd'        => ( is => 'rw', init_arg => undef, default => 'stop' );
 has 'validate_regex'  => ( is => 'ro', isa => 'RegexpRef' );
@@ -218,8 +220,10 @@ sub graceful_stop {
 sub graceful {
     my $self = shift;
 
-    my $proc = $self->_ensure_is_running() or return;
+    my $proc = $self->is_running()
+      || return $self->start();
     $self->_warn_if_different_user($proc);
+    $self->check_conf_syntax();
 
     my $error_size_start = $self->_start_error_log_watch();
 
@@ -312,7 +316,7 @@ Server::Control::Apache -- Control Apache ala apachtctl
 
 =head1 VERSION
 
-version 0.15
+version 0.16
 
 =head1 SYNOPSIS
 
@@ -387,8 +391,9 @@ L<Server::Control|Server::Control>:
 
 =item graceful
 
-Gracefully restart the server - see
-http://httpd.apache.org/docs/2.2/stopping.html
+If server is not running, then start it. Otherwise,  gracefully restart the
+server - see http://httpd.apache.org/docs/2.2/stopping.html. You can assign
+this to L<Server::Control/restart_method>.
 
 =item graceful-stop
 
