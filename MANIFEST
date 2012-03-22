@@ -23,9 +23,9 @@ lib/Server/Control/t/Sanity.pm
 lib/Server/Control/t/Util.pm
 t/00-load.t
 t/HTTPServerSimple.t
-t/NetServer.t
 t/Sanity.t
 t/release-Apache.t
 t/release-Util.t
 t/release-apachectlp.t
 t/release-no-moosex-traits.t
+xt/NetServer.t
