@@ -1,5 +1,6 @@
-#!/usr/bin/perl -w
+#!/usr/bin/perl
 use strict;
+use warnings;
 use Server::Control::Apache;
 
 Server::Control->handle_cli();
@@ -14,7 +15,7 @@ serverctlp - apachectl style controller for servers
 
 =head1 VERSION
 
-version 0.17
+version 0.18
 
 =head1 SYNOPSIS
 

@@ -1,11 +1,12 @@
 package Server::Control;
 BEGIN {
-  $Server::Control::VERSION = '0.17';
+  $Server::Control::VERSION = '0.18';
 }
 use Capture::Tiny;
 use File::Basename;
 use File::Slurp qw(read_file);
 use File::Spec::Functions qw(catdir);
+use File::Which;
 use Getopt::Long;
 use Hash::MoreUtils qw(slice_def);
 use IPC::System::Simple qw();
@@ -43,6 +44,8 @@ if ( my $moosex_traits_error = $@ ) {
 # Note: In some cases we use lazy_build rather than specifying required or a
 # default, to make life easier for subclasses.
 #
+has 'binary_name'          => ( is => 'ro', isa => 'Str' );
+has 'binary_path'          => ( is => 'ro', isa => 'Str', lazy_build => 1 );
 has 'bind_addr'            => ( is => 'ro', isa => 'Str', lazy_build => 1 );
 has 'description'          => ( is => 'ro', isa => 'Str', lazy_build => 1, init_arg => undef );
 has 'error_log'            => ( is => 'ro', isa => 'Str', lazy_build => 1 );
@@ -54,6 +57,8 @@ has 'port'                 => ( is => 'ro', isa => 'Int', lazy_build => 1 );
 has 'restart_method'       => ( is => 'ro', isa => enum( [qw(hup stopstart)] ), default => 'stopstart' );
 has 'server_root'          => ( is => 'ro', isa => 'Str' );
 has 'use_sudo'             => ( is => 'ro', isa => 'Bool', lazy_build => 1 );
+has 'validate_regex'       => ( is => 'ro', isa => 'RegexpRef' );
+has 'validate_url'         => ( is => 'ro' );
 has 'wait_for_hup_secs'    => ( is => 'ro', isa => 'Num', default => 0.5 );
 has 'wait_for_status_secs' => ( is => 'ro', isa => 'Int', default => 10 );
 
@@ -61,9 +66,7 @@ has 'wait_for_status_secs' => ( is => 'ro', isa => 'Int', default => 10 );
 #
 has 'action' => ( is => 'ro', isa => 'Str' );
 
-foreach
-  my $method (qw(successful_start successful_stop failed_start failed_stop))
-{
+foreach my $method (qw(successful_start successful_stop)) {
     __PACKAGE__->meta->add_method( $method => sub { } );
 }
 
@@ -137,6 +140,17 @@ sub _log_constructor_params {
 
 sub _build_bind_addr {
     return "localhost";
+}
+
+sub _build_binary_path {
+    my $self = shift;
+    if ( my $binary_name = $self->binary_name ) {
+        my $binary_path = ( File::Which::which($binary_name) )[0]
+          or die
+          "no binary_path specified and cannot find '$binary_name' in path";
+        return $binary_path;
+    }
+    return undef;
 }
 
 sub _build_error_log {
@@ -217,7 +231,6 @@ sub start {
             }
         }
     }
-    $self->failed_start();
     return 0;
 }
 
@@ -267,7 +280,6 @@ sub stop {
         $self->successful_stop();
         return 1;
     }
-    $self->failed_stop();
     return 0;
 }
 
@@ -383,38 +395,24 @@ sub is_running {
     my ($self) = @_;
 
     my $pid_file = $self->pid_file();
-    my $pid_contents = eval { read_file($pid_file) };
-    if ($@) {
-        $log->debugf( "pid file '%s' does not exist", $pid_file )
+    my $pid      = $self->_read_pid_file($pid_file);
+    return undef unless $pid;
+
+    if ( my $proc = $self->_find_process($pid) ) {
+        $log->debugf( "pid file '%s' exists and has valid pid %d",
+            $pid_file, $pid )
           if $log->is_debug && !$self->{_suppress_logs};
-        return undef;
+        return $proc;
     }
     else {
-        my ($pid) = ( $pid_contents =~ /^\s*(\d+)\s*$/ );
-        unless ( defined($pid) ) {
-            $log->infof( "pid file '%s' does not contain a valid process id!",
-                $pid_file );
+        if ( -f $pid_file ) {
+            $log->infof(
+                "pid file '%s' contains a non-existing process id '%d'!",
+                $pid_file, $pid );
             $self->_handle_corrupt_pid_file();
-            return undef;
-        }
-
-        my $ptable = process_table();
-        if ( my ($proc) = grep { $_->pid == $pid } @{ $ptable->table } ) {
-            $log->debugf( "pid file '%s' exists and has valid pid %d",
-                $pid_file, $pid )
-              if $log->is_debug && !$self->{_suppress_logs};
-            return $proc;
-        }
-        else {
-            if ( -f $pid_file ) {
-                $log->infof(
-                    "pid file '%s' contains a non-existing process id '%d'!",
-                    $pid_file, $pid );
-                $self->_handle_corrupt_pid_file();
-                return undef;
-            }
         }
     }
+    return undef;
 }
 
 sub is_listening {
@@ -434,9 +432,35 @@ sub is_listening {
 sub validate_server {
     my ($self) = @_;
 
-    # Validate running server, in a server-specific way. By default just assume valid.
-    #
-    return 1;
+    if ( defined( my $url = $self->validate_url ) ) {
+        require LWP;
+        $url = sprintf( "http://%s%s%s",
+            $self->bind_addr,
+            ( $self->port == 80 ? '' : ( ":" . $self->port ) ), $url )
+          if substr( $url, 0, 1 ) eq '/';
+        $log->infof( "validating url '%s'", $url );
+        my $ua  = LWP::UserAgent->new;
+        my $res = $ua->get($url);
+        if ( $res->is_success ) {
+            if ( my $regex = $self->validate_regex ) {
+                if ( $res->content !~ $regex ) {
+                    $log->errorf(
+                        "content of '%s' (%d bytes) did not match regex '%s'",
+                        $url, length( $res->content ), $regex );
+                    return 0;
+                }
+            }
+            $log->debugf("validation successful") if $log->is_debug;
+            return 1;
+        }
+        else {
+            $log->errorf( "error getting '%s': %s", $url, $res->status_line );
+            return 0;
+        }
+    }
+    else {
+        return 1;
+    }
 }
 
 sub run_system_command {
@@ -621,6 +645,7 @@ sub _cli_get_options {
 sub _cli_option_pairs {
     return (
         'bind-addr=s'            => 'bind_addr',
+        'b|binary=s'             => 'binary_path',
         'd|server-root=s'        => 'server_root',
         'error-log=s'            => 'error_log',
         'h|help'                 => 'help',
@@ -718,6 +743,35 @@ sub _warn_if_different_user {
     }
 }
 
+sub _find_process {
+    my ( $self, $pid ) = @_;
+
+    my $ptable = process_table();
+    my ($proc) = grep { $_->pid == $pid } @{ $ptable->table };
+    return $proc;
+}
+
+sub _read_pid_file {
+    my ( $self, $pid_file ) = @_;
+
+    my $pid_contents = eval { read_file($pid_file) };
+    if ($@) {
+        $log->debugf( "pid file '%s' does not exist", $pid_file )
+          if $log->is_debug && !$self->{_suppress_logs};
+        return undef;
+    }
+    else {
+        my ($pid) = ( $pid_contents =~ /^\s*(\d+)\s*$/ );
+        unless ( defined($pid) ) {
+            $log->infof( "pid file '%s' does not contain a valid process id!",
+                $pid_file );
+            $self->_handle_corrupt_pid_file();
+            return undef;
+        }
+        return $pid;
+    }
+}
+
 1;
 
 
@@ -730,7 +784,7 @@ Server::Control -- Flexible apachectl style control for servers
 
 =head1 VERSION
 
-version 0.17
+version 0.18
 
 =head1 SYNOPSIS
 
@@ -787,20 +841,30 @@ The following subclasses are currently available as part of this distribution:
 
 =item *
 
-L<Server::Control::Apache> - Apache httpd
+L<Server::Control::Apache> - For L<Apache httpd|http://httpd.apache.org/>
 
 =item *
 
-L<Server::Control::HTTPServerSimple> - HTTP::Server::Simple server
+L<Server::Control::Nginx> - For L<Nginx|http://nginx.org/>
 
 =item *
 
-L<Server::Control::NetServer> - Net::Server server
+L<Server::Control::Starman> - For L<Starman|Starman>
+
+=item *
+
+L<Server::Control::HTTPServerSimple> - For
+L<HTTP::Server::Simple|HTTP::Server::Simple>
+
+=item *
+
+L<Server::Control::NetServer> - For L<Net::Server|Net::Server>
 
 =back
 
-These will probably be moved into their own distributions once the
-implementation stabilizes.
+There may be other subclasses
+L<http://search.cpan.org/search?query=Server%3A%3AControl&mode=all|available on
+CPAN>.
 
 =for readme stop
 
@@ -815,6 +879,13 @@ L<Server::Control::Apache|Server::Control::Apache> can deduce many of these
 from the Apache conf file.
 
 =over
+
+=item binary_path
+
+The absolute path to the server binary, e.g. /usr/sbin/httpd or
+/usr/local/bin/nginx. By default, searches for the appropriate command in the
+user's PATH and uses the first one found, or throws an error if one cannot be
+found.
 
 =item bind_addr
 
@@ -879,6 +950,17 @@ in an rc file.
 
 Whether to use 'sudo' when attempting to start and stop server. Defaults to
 true if I<port> < 1024, false otherwise.
+
+=item validate_url
+
+A URL to visit after the server has been started or HUP'd, in order to validate
+the state of the server. The URL just needs to return an OK result to be
+considered valid, unless L</validate_regex> is also specified.
+
+=item validate_regex
+
+A regex to match against the content returned by L</validate_url>. The content
+must match the regex for the server to be considered valid.
 
 =item wait_for_status_secs
 
@@ -1089,12 +1171,12 @@ L</use_sudo>), logs the command, and throws runtime errors appropriately.
 =item validate_server ()
 
 This method is called after the server starts or is HUP'd. It gives the
-subclass a chance to validate the server in a particular way. For example,
-L<Server::Control::Apache|Server::Control::Apache> can visit a particular URL
-and make sure the result is as expected.
+subclass a chance to validate the server in a particular way. It should return
+a boolean indicating whether the server is in a valid state.
 
-C<validate_server> should return a boolean indicating whether the server is in
-a valid state. The default C<validate_server> always returns true.
+The default C<validate_server> uses L</validate_url> and L</validate_regex> to
+make a test web request against the server. If these are not provided then it
+simply returns true.
 
 =back
 
@@ -1115,15 +1197,7 @@ successful_start - called when a start() succeeds
 
 =item *
 
-failed_start - called when a start() fails
-
-=item *
-
 successful_stop - called when a stop() succeeds
-
-=item *
-
-failed_stop - called when a stop() fails
 
 =back
 
@@ -1188,28 +1262,6 @@ servers, say). May end up using this role.
 L<Nginx::Control|Nginx::Control>, L<Sphinx::Control|Sphinx::Control>,
 L<Lighttpd::Control|Lighttpd::Control> - Modules which use
 L<MooseX::Control|MooseX::Control>
-
-=back
-
-=head1 TO DO
-
-=over
-
-=item *
-
-Plugin to check a URL after start and make sure it comes back ok
-
-=item *
-
-Plugin to dynamically generate conf files
-
-=item *
-
-Consult global serverctlrc file as well, for common host settings
-
-=item *
-
-Add persistent shell mode, to eliminate startup cost for repeated restarts
 
 =back
 

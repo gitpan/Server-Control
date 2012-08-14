@@ -2,7 +2,7 @@ NAME
     Server::Control -- Flexible apachectl style control for servers
 
 VERSION
-    version 0.17
+    version 0.18
 
 SYNOPSIS
         use Server::Control::Apache;
@@ -41,14 +41,18 @@ AVAILABLE SUBCLASSES
     The following subclasses are currently available as part of this
     distribution:
 
-    *   Server::Control::Apache - Apache httpd
+    *   Server::Control::Apache - For Apache httpd
 
-    *   Server::Control::HTTPServerSimple - HTTP::Server::Simple server
+    *   Server::Control::Nginx - For Nginx
 
-    *   Server::Control::NetServer - Net::Server server
+    *   Server::Control::Starman - For Starman
 
-    These will probably be moved into their own distributions once the
-    implementation stabilizes.
+    *   Server::Control::HTTPServerSimple - For HTTP::Server::Simple
+
+    *   Server::Control::NetServer - For Net::Server
+
+    There may be other subclasses
+    http://search.cpan.org/search?query=Server%3A%3AControl&mode=all.
 
 RELATED MODULES
     *   App::Control - Same basic idea for any application with a pid file.
@@ -63,16 +67,6 @@ RELATED MODULES
 
     *   Nginx::Control, Sphinx::Control, Lighttpd::Control - Modules which
         use MooseX::Control
-
-TO DO
-    *   Plugin to check a URL after start and make sure it comes back ok
-
-    *   Plugin to dynamically generate conf files
-
-    *   Consult global serverctlrc file as well, for common host settings
-
-    *   Add persistent shell mode, to eliminate startup cost for repeated
-        restarts
 
 ACKNOWLEDGMENTS
     This module was developed for the Digital Media group of the Hearst

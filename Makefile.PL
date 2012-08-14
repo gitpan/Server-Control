@@ -51,7 +51,7 @@ my %WriteMakefileArgs = (
     'Time::HiRes' => '0',
     'YAML::Any' => '0'
   },
-  'VERSION' => '0.17',
+  'VERSION' => '0.18',
   'test' => {
     'TESTS' => 't/*.t'
   }

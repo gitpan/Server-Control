@@ -1,6 +1,6 @@
 package Server::Control::Apache;
 BEGIN {
-  $Server::Control::Apache::VERSION = '0.17';
+  $Server::Control::Apache::VERSION = '0.18';
 }
 use Apache::ConfigParser;
 use Capture::Tiny;
@@ -17,23 +17,20 @@ use warnings;
 
 extends 'Server::Control';
 
+has '+binary_name'    => ( is => 'ro', isa => 'Str', default => 'httpd' );
 has 'conf_file'       => ( is => 'ro', lazy_build => 1, required => 1 );
-has 'httpd_binary'    => ( is => 'ro', lazy_build => 1 );
 has 'no_parse_config' => ( is => 'ro' );
 has 'parsed_config'   => ( is => 'ro', lazy_build => 1, init_arg => undef );
 has 'restart_method'  => ( is => 'ro', isa => enum( [qw(graceful hup stopstart)] ), default => 'stopstart' );
 has 'server_root'     => ( is => 'ro', lazy_build => 1 );
 has 'stop_cmd'        => ( is => 'rw', init_arg => undef, default => 'stop' );
-has 'validate_regex'  => ( is => 'ro', isa => 'RegexpRef' );
-has 'validate_url'    => ( is => 'ro' );
 
 sub _cli_option_pairs {
     my $class = shift;
     return (
         $class->SUPER::_cli_option_pairs,
-        'f|conf-file=s'    => 'conf_file',
-        'b|httpd-binary=s' => 'httpd_binary',
-        'no-parse-config'  => 'no_parse_config',
+        'f|conf-file=s'   => 'conf_file',
+        'no-parse-config' => 'no_parse_config',
     );
 }
 
@@ -59,6 +56,18 @@ sub BUILD {
 
     $self->_validate_conf_file();
 }
+
+# Alias old apache_binary to binary_path
+#
+around BUILDARGS => sub {
+    my ( $orig, $class, %params ) = @_;
+
+    if ( my $binary_path = delete( $params{apache_binary} ) ) {
+        $params{binary_path} = $binary_path;
+    }
+    return $class->$orig(%params);
+};
+*apache_binary = *binary_path;
 
 sub _validate_conf_file {
     my ($self) = @_;
@@ -89,14 +98,6 @@ sub _validate_conf_file {
     else {
         die "no conf_file or server_root specified";
     }
-}
-
-sub _build_httpd_binary {
-    my $self  = shift;
-    my $httpd = ( which('httpd') )[0]
-      or die "no httpd_binary specified and cannot find in path";
-    $log->debugf("setting httpd_binary to '$httpd'") if $log->is_debug;
-    return $httpd;
 }
 
 sub _build_parsed_config {
@@ -196,10 +197,10 @@ override 'hup' => sub {
 };
 
 sub check_conf_syntax {
-    my $self         = shift;
-    my $httpd_binary = $self->httpd_binary();
-    my $conf_file    = $self->conf_file();
-    my $cmd          = "$httpd_binary -t -f $conf_file";
+    my $self        = shift;
+    my $binary_path = $self->binary_path();
+    my $conf_file   = $self->conf_file();
+    my $cmd         = "$binary_path -t -f $conf_file";
 
     # To avoid printing 'syntax ok', use system() with output captured
     # first; if error result, then use run() for error processing
@@ -252,45 +253,11 @@ sub graceful {
 sub run_httpd_command {
     my ( $self, $command ) = @_;
 
-    my $httpd_binary = $self->httpd_binary();
-    my $conf_file    = $self->conf_file();
+    my $binary_path = $self->binary_path();
+    my $conf_file   = $self->conf_file();
 
-    my $cmd = "$httpd_binary -k $command -f $conf_file";
+    my $cmd = "$binary_path -k $command -f $conf_file";
     $self->run_system_command($cmd);
-}
-
-sub validate_server {
-    my ($self) = @_;
-
-    if ( defined( my $url = $self->validate_url ) ) {
-        require LWP;
-        $url = sprintf( "http://%s%s%s",
-            $self->bind_addr,
-            ( $self->port == 80 ? '' : ( ":" . $self->port ) ), $url )
-          if substr( $url, 0, 1 ) eq '/';
-        $log->infof( "validating url '%s'", $url );
-        my $ua  = LWP::UserAgent->new;
-        my $res = $ua->get($url);
-        if ( $res->is_success ) {
-            if ( my $regex = $self->validate_regex ) {
-                if ( $res->content !~ $regex ) {
-                    $log->errorf(
-                        "content of '%s' (%d bytes) did not match regex '%s'",
-                        $url, length( $res->content ), $regex );
-                    return 0;
-                }
-            }
-            $log->debugf("validation successful") if $log->is_debug;
-            return 1;
-        }
-        else {
-            $log->errorf( "error getting '%s': %s", $url, $res->status_line );
-            return 0;
-        }
-    }
-    else {
-        return 1;
-    }
 }
 
 sub _rel2abs {
@@ -316,7 +283,7 @@ Server::Control::Apache -- Control Apache ala apachtctl
 
 =head1 VERSION
 
-version 0.17
+version 0.18
 
 =head1 SYNOPSIS
 
@@ -333,11 +300,13 @@ version 0.17
 
 =head1 DESCRIPTION
 
-Server::Control::Apache is a subclass of Server::Control for Apache httpd
-processes. It has the same basic function as apachectl, only with a richer
-feature set.
+Server::Control::Apache is a subclass of L<Server::Control|Server::Control> for
+L<Apache httpd|http://httpd.apache.org/> processes. It has the same basic
+function as
+L<apachectl|http://httpd.apache.org/docs/2.2/programs/apachectl.html>, only
+with a richer feature set.
 
-This module has an associated binary, L<apachectlp|apachectlp>, which you may
+This module has an associated script, L<apachectlp|apachectlp>, which you may
 want to use instead.
 
 =head1 CONSTRUCTOR
@@ -347,32 +316,21 @@ L<Server::Control|Server::Control>:
 
 =over
 
+=item apache_binary
+
+An alias for L<Server::Control/binary_path>, left in for backward
+compatibility.
+
 =item conf_file
 
 Path to conf file. Will try to use
 L<Server::Control/server_root>/conf/httpd.conf if C<server_root> was specified
 and C<conf_file> was not. Throws an error if it cannot be determined.
 
-=item httpd_binary
-
-Path to httpd binary. By default, searches for httpd in the user's PATH and
-uses the first one found.
-
 =item no_parse_config
 
 Don't attempt to parse the httpd.conf; only look at values passed in the usual
 ways.
-
-=item validate_url
-
-A URL to visit after the server has been started or HUP'd, in order to validate
-the state of the server. The URL just needs to return an OK result to be
-considered valid, unless L</validate_regex> is also specified.
-
-=item validate_regex
-
-A regex to match against the content returned by L</validate_url>. The content
-must match the regex for the server to be considered valid.
 
 =back
 
