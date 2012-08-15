@@ -1,6 +1,6 @@
 package Server::Control::Apache;
 BEGIN {
-  $Server::Control::Apache::VERSION = '0.18';
+  $Server::Control::Apache::VERSION = '0.19';
 }
 use Apache::ConfigParser;
 use Capture::Tiny;
@@ -57,17 +57,19 @@ sub BUILD {
     $self->_validate_conf_file();
 }
 
-# Alias old apache_binary to binary_path
+# Alias old httpd_binary to binary_path
 #
 around BUILDARGS => sub {
-    my ( $orig, $class, %params ) = @_;
+    my $orig   = shift;
+    my $class  = shift;
+    my $params = $class->$orig(@_);
 
-    if ( my $binary_path = delete( $params{apache_binary} ) ) {
-        $params{binary_path} = $binary_path;
+    if ( my $binary_path = delete( $params->{httpd_binary} ) ) {
+        $params->{binary_path} = $binary_path;
     }
-    return $class->$orig(%params);
+    return $params;
 };
-*apache_binary = *binary_path;
+*httpd_binary = *binary_path;
 
 sub _validate_conf_file {
     my ($self) = @_;
@@ -283,7 +285,7 @@ Server::Control::Apache -- Control Apache ala apachtctl
 
 =head1 VERSION
 
-version 0.18
+version 0.19
 
 =head1 SYNOPSIS
 
@@ -316,7 +318,7 @@ L<Server::Control|Server::Control>:
 
 =over
 
-=item apache_binary
+=item httpd_binary
 
 An alias for L<Server::Control/binary_path>, left in for backward
 compatibility.

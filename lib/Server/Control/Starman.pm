@@ -1,6 +1,6 @@
 package Server::Control::Starman;
 BEGIN {
-  $Server::Control::Starman::VERSION = '0.18';
+  $Server::Control::Starman::VERSION = '0.19';
 }
 use File::Slurp qw(read_file);
 use File::Which qw(which);
@@ -101,7 +101,7 @@ Server::Control::Starman -- Control Starman
 
 =head1 VERSION
 
-version 0.18
+version 0.19
 
 =head1 SYNOPSIS
 

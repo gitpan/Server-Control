@@ -1,6 +1,6 @@
 package Server::Control::NetServer;
 BEGIN {
-  $Server::Control::NetServer::VERSION = '0.18';
+  $Server::Control::NetServer::VERSION = '0.19';
 }
 use Carp;
 use Moose;
@@ -86,7 +86,7 @@ Server::Control::NetServer -- apachectl style control for Net::Server servers
 
 =head1 VERSION
 
-version 0.18
+version 0.19
 
 =head1 SYNOPSIS
 

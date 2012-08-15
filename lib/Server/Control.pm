@@ -1,6 +1,6 @@
 package Server::Control;
 BEGIN {
-  $Server::Control::VERSION = '0.18';
+  $Server::Control::VERSION = '0.19';
 }
 use Capture::Tiny;
 use File::Basename;
@@ -784,7 +784,7 @@ Server::Control -- Flexible apachectl style control for servers
 
 =head1 VERSION
 
-version 0.18
+version 0.19
 
 =head1 SYNOPSIS
 
