@@ -2,7 +2,7 @@ NAME
     Server::Control -- Flexible apachectl style control for servers
 
 VERSION
-    version 0.19
+    version 0.20
 
 SYNOPSIS
         use Server::Control::Apache;
@@ -51,8 +51,7 @@ AVAILABLE SUBCLASSES
 
     *   Server::Control::NetServer - For Net::Server
 
-    There may be other subclasses
-    http://search.cpan.org/search?query=Server%3A%3AControl&mode=all.
+    There may be other subclasses available on CPAN.
 
 RELATED MODULES
     *   App::Control - Same basic idea for any application with a pid file.

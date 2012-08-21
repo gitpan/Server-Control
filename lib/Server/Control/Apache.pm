@@ -1,6 +1,6 @@
 package Server::Control::Apache;
 BEGIN {
-  $Server::Control::Apache::VERSION = '0.19';
+  $Server::Control::Apache::VERSION = '0.20';
 }
 use Apache::ConfigParser;
 use Capture::Tiny;
@@ -285,7 +285,7 @@ Server::Control::Apache -- Control Apache ala apachtctl
 
 =head1 VERSION
 
-version 0.19
+version 0.20
 
 =head1 SYNOPSIS
 

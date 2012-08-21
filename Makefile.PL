@@ -9,7 +9,7 @@ use ExtUtils::MakeMaker 6.30;
 
 
 my %WriteMakefileArgs = (
-  'ABSTRACT' => 'Process a directory of templates',
+  'ABSTRACT' => 'Flexible apachectl style control for servers',
   'AUTHOR' => 'Jonathan Swartz <swartz@pobox.com>',
   'BUILD_REQUIRES' => {
     'File::Path' => '0',
@@ -51,7 +51,7 @@ my %WriteMakefileArgs = (
     'Time::HiRes' => '0',
     'YAML::Any' => '0'
   },
-  'VERSION' => '0.19',
+  'VERSION' => '0.20',
   'test' => {
     'TESTS' => 't/*.t'
   }

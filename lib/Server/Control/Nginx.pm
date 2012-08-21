@@ -1,6 +1,6 @@
 package Server::Control::Nginx;
 BEGIN {
-  $Server::Control::Nginx::VERSION = '0.19';
+  $Server::Control::Nginx::VERSION = '0.20';
 }
 use Log::Any qw($log);
 use Moose;
@@ -40,7 +40,7 @@ Server::Control::Nginx -- Control Nginx
 
 =head1 VERSION
 
-version 0.19
+version 0.20
 
 =head1 SYNOPSIS
 

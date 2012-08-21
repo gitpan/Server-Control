@@ -1,5 +1,5 @@
 {
-   "abstract" : "Process a directory of templates",
+   "abstract" : "Flexible apachectl style control for servers",
    "author" : [
       "Jonathan Swartz <swartz@pobox.com>"
    ],
@@ -79,6 +79,6 @@
          "web" : "https://github.com/jonswar/perl-server-control"
       }
    },
-   "version" : "0.19"
+   "version" : "0.20"
 }
 

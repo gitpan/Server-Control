@@ -1,6 +1,6 @@
 package Server::Control::HTTPServerSimple;
 BEGIN {
-  $Server::Control::HTTPServerSimple::VERSION = '0.19';
+  $Server::Control::HTTPServerSimple::VERSION = '0.20';
 }
 use Carp;
 use Moose;
@@ -71,7 +71,7 @@ HTTP::Server::Simple servers
 
 =head1 VERSION
 
-version 0.19
+version 0.20
 
 =head1 SYNOPSIS
 

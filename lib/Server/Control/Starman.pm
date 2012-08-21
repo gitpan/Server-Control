@@ -1,6 +1,6 @@
 package Server::Control::Starman;
 BEGIN {
-  $Server::Control::Starman::VERSION = '0.19';
+  $Server::Control::Starman::VERSION = '0.20';
 }
 use File::Slurp qw(read_file);
 use File::Which qw(which);
@@ -42,20 +42,20 @@ sub _underscore_to_dash {
     return $str;
 }
 
-sub _build_error_log {
+override _build_error_log => sub {
     my $self = shift;
-    return $self->options->{error_log};
-}
+    return $self->options->{error_log} || super();
+};
 
-sub _build_pid_file {
+override _build_pid_file => sub {
     my $self = shift;
-    return $self->options->{pid};
-}
+    return $self->options->{pid} || super();
+};
 
-sub _build_port {
+override _build_port => sub {
     my $self = shift;
-    return $self->options->{port} || die "cannot determine port";
-}
+    return $self->options->{port} || super();
+};
 
 sub do_start {
     my $self = shift;
@@ -101,7 +101,7 @@ Server::Control::Starman -- Control Starman
 
 =head1 VERSION
 
-version 0.19
+version 0.20
 
 =head1 SYNOPSIS
 
@@ -112,7 +112,7 @@ version 0.19
         options => {
             port      => 123,
             error_log => '/path/to/error.log',
-            pid_file  => '/path/to/starman.pid'
+            pid       => '/path/to/starman.pid'
         },
     );
     if ( !$starman->is_running() ) {
@@ -144,12 +144,28 @@ passing to starman.
 
 C<--daemonize> and C<--preload-app> are automatically passed to starman; the
 only current way to change this is by subclassing and overriding
-_build_options_string.
+C<_build_options_string>.
+
+In addition, the C<error_log>, C<pid>, and C<port> options, if given, will be
+used to populate the corresponding Server::Control parameters
+(L<error_log|Server::Control/error_log>, L<pid_file|Server::Control/pid_file>,
+and L<port|Server::Control/port>).
+
+e.g. this
+
+    options => {
+        port      => 123,
+        error_log => '/path/to/error.log',
+        max_requests => 100,
+        pid       => '/path/to/starman.pid'
+    }
+
+will result in command line options
+
+    --port 123 --error-log /path/to/error.log --max-requests 100
+    --pid /path/to/starman.pid --daemonize --preload-app
 
 =back
-
-This module will determine L<Server::Control/error_log>,
-L<Server::Control/pid_file>, and L<Server::Control/port> from the options hash.
 
 =head1 SEE ALSO
 
